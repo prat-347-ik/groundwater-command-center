@@ -11,3 +11,5 @@ python-dotenv
 structlog
 dnspython
 pytest
+pandas
+scikit-learn
