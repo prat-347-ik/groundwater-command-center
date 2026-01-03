@@ -3,3 +3,11 @@ pydantic
 pandas
 python-dotenv
 structlog
+pymongo
+pydantic
+pandas
+numpy
+python-dotenv
+structlog
+dnspython
+pytest

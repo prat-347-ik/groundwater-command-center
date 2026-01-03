@@ -2,3 +2,7 @@ node_modules/
 venv/
 scripts/*
 .env
+__pycache__/
+*.pyc
+__pypackages__/
+.DS_Store
