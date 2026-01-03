@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "region_id": "region-001",
+    "active_version": "20240102_120000",
+    "artifact_path": "services/service-b-analytics/models/v1/artifacts/region-001_20240102_120000.pkl",
+    "metadata_path": "services/service-b-analytics/models/v1/metadata/region-001_20240102_120000.json",
+    "promoted_at": "2024-01-02T12:05:00Z",
+    "status": "prod"
+  }
+]

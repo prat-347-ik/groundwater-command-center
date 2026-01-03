@@ -28,6 +28,42 @@ FEATURES = [
     'feat_cos_day'
 ]
 
+def load_active_models() -> Dict[str, str]:
+    """
+    Loads the registry and maps region_id -> artifact_path strictly for ACTIVE models.
+    
+    Constraints:
+    - Must load from registry.json (Single Source of Truth)
+    - Must filter by status="active"
+    - Must fail fast if no models are available
+    """
+    if not os.path.exists(REGISTRY_PATH):
+        # Fail Fast: If registry is missing, the system is in an invalid state.
+        raise FileNotFoundError(f"🚨 CRITICAL: Registry not found at {REGISTRY_PATH}. Cannot perform inference.")
+        
+    try:
+        with open(REGISTRY_PATH, 'r') as f:
+            registry = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"🚨 CRITICAL: Corrupted registry file. {e}")
+
+    # Filter: Select ONLY active models
+    # This prevents loading 'staged', 'archived', or 'rejected' models
+    active_models = [
+        entry for entry in registry 
+        if entry.get('status') == 'active'
+    ]
+    
+    if not active_models:
+        # Fail Fast: Running inference with 0 models is likely a pipeline error
+        raise RuntimeError("🚨 CRITICAL: Registry exists but contains NO 'active' models. Aborting.")
+
+    # Create optimized lookup map
+    model_map = {entry['region_id']: entry['artifact_path'] for entry in active_models}
+    
+    logging.info(f"✅ Loaded {len(model_map)} active models from registry.")
+    return model_map
+
 def load_model_registry() -> Dict[str, str]:
     """
     Loads the registry and maps region_id -> artifact_path.

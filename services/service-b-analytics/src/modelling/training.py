@@ -2,6 +2,7 @@ import os
 import pickle
 import json
 import logging
+import subprocess
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -16,7 +17,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-ARTIFACTS_DIR = "models/v1"
+# Root directory for the model versioning system
+ARTIFACTS_ROOT = "models/v1"
 FEATURES = [
     'feat_rainfall_1d_lag', 
     'feat_rainfall_7d_sum', 
@@ -103,16 +105,44 @@ def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any
     
     logger.info(f"✅ Region {region_id}: MAE={mae:.4f} (Baseline={persistence_mae:.4f})")
 
-    # 7. Save Artifacts
+    # 7. Save Artifacts & Metadata (Versioning Logic)
+    # ---------------------------------------------------------
+    # Define sub-directories
+    artifacts_dir = os.path.join(ARTIFACTS_ROOT, "artifacts")
+    metadata_dir = os.path.join(ARTIFACTS_ROOT, "metadata")
+    os.makedirs(artifacts_dir, exist_ok=True)
+    os.makedirs(metadata_dir, exist_ok=True)
+
+    # Retrieve Git Hash for Lineage
+    # This binds the code version to the binary artifact
+    try:
+        git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
+    except Exception:
+        git_hash = "nohash"
+
+    # Generate Naming: {region_id}_{YYYYMMDD_HHMMSS}_{git_hash}
+    # Timestamp is UTC to ensure global consistency
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    model_filename = f"{region_id}_{timestamp}.pkl"
-    save_path = os.path.join(ARTIFACTS_DIR, model_filename)
+    base_filename = f"{region_id}_{timestamp}_{git_hash}"
     
-    with open(save_path, 'wb') as f:
+    artifact_filename = f"{base_filename}.pkl"
+    metadata_filename = f"{base_filename}.json"
+    
+    artifact_path = os.path.join(artifacts_dir, artifact_filename)
+    metadata_path = os.path.join(metadata_dir, metadata_filename)
+    
+    # Safety Check: Never overwrite existing files (Immutability)
+    if os.path.exists(artifact_path):
+        logger.error(f"⛔ Artifact collision detected: {artifact_path}")
+        raise FileExistsError(f"Artifact {artifact_path} already exists. Aborting to maintain immutability.")
+    
+    # Save Binary Artifact
+    with open(artifact_path, 'wb') as f:
         pickle.dump(model, f)
-        
-    # 8. Return Metadata
-    return {
+
+    # 8. Prepare & Save Metadata
+    # This file provides the audit trail for the binary
+    metadata = {
         "region_id": region_id,
         "model_type": "LinearRegression",
         "features": FEATURES,
@@ -120,11 +150,22 @@ def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any
         "test_rows": len(test_df),
         "mae": round(mae, 4),
         "baseline_mae": round(persistence_mae, 4),
-        "artifact_path": save_path,
+        "artifact_path": artifact_path,
+        "metadata_path": metadata_path,
         "trained_at": timestamp,
+        "git_hash": git_hash,
         "coefficients": {feat: round(coef, 4) for feat, coef in zip(FEATURES, model.coef_)},
         "intercept": round(model.intercept_, 4)
     }
+
+    # Save Metadata JSON
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+    logger.info(f"💾 Artifact saved: {artifact_path}")
+    logger.info(f"📄 Metadata saved: {metadata_path}")
+
+    return metadata
 
 def run_training_pipeline():
     """
@@ -132,7 +173,7 @@ def run_training_pipeline():
     """
     try:
         # Setup output directory
-        os.makedirs(ARTIFACTS_DIR, exist_ok=True)
+        os.makedirs(ARTIFACTS_ROOT, exist_ok=True)
         
         # Load Data
         df = fetch_training_data()
@@ -148,12 +189,14 @@ def run_training_pipeline():
             if metadata:
                 results.append(metadata)
         
-        # Save Registry (Model Catalog)
-        registry_path = os.path.join(ARTIFACTS_DIR, "model_registry.json")
-        with open(registry_path, 'w') as f:
+        # Save Run Manifest
+        # NOTE: We do NOT overwrite 'registry.json' here. 
+        # Promotion to registry is a separate gated process.
+        manifest_path = os.path.join(ARTIFACTS_ROOT, "latest_run_manifest.json")
+        with open(manifest_path, 'w') as f:
             json.dump(results, f, indent=2)
             
-        logger.info(f"🎉 Training Complete. Models saved to {ARTIFACTS_DIR}")
+        logger.info(f"🎉 Training Complete. Run manifest saved to {manifest_path}")
         
     except Exception as e:
         logger.exception(f"❌ Training Pipeline Failed: {e}")
