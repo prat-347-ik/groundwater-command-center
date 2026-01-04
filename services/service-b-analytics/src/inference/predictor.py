@@ -194,7 +194,9 @@ def run_inference():
                     ]])
                 
                 # 2. Predict
-                prediction = model.predict(input_vector)[0]
+                # Use DataFrame to pass feature names and avoid sklearn warnings
+                input_df = pd.DataFrame(input_vector, columns=FEATURES)
+                prediction = model.predict(input_df)[0]
                 
                 # 3. Append to Results
                 forecasts.append({
