@@ -1,0 +1,11 @@
+# --- Service C: Orchestration ---
+
+# 1. Ignore Runtime Logs
+logs/*.log
+
+# 2. Ignore Environment Config
+.env
+
+# 3. Ignore Python Cache
+__pycache__/
+*.pyc
