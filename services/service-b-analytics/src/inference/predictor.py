@@ -208,17 +208,34 @@ def run_inference():
                     "horizon_step": i
                 })
 
-        # 4. Save to OLAP
+# ... (Previous code remains unchanged)
+
+        # 4. Save to OLAP (Idempotent Update)
         if forecasts:
             db = mongo_client.get_olap_db()
             collection = db[FORECAST_COLLECTION]
             
-            # Idempotency: Delete existing forecasts for these dates/regions before inserting?
-            # For simplicity in v1, we just insert. A production job might clear overlap.
+            # --- IDEMPOTENCY FIX ---
+            # Group forecasts by region to minimize DB queries
+            region_ids = list(set(f['region_id'] for f in forecasts))
+            forecast_dates = list(set(f['forecast_date'] for f in forecasts))
+            
+            logger.info(f"🧹 Clearing existing forecasts for {len(region_ids)} regions...")
+            
+            # Delete any existing records that match our new batch (Region + Date collision)
+            delete_result = collection.delete_many({
+                "region_id": {"$in": region_ids},
+                "forecast_date": {"$in": forecast_dates}
+            })
+            logger.info(f"   - Removed {delete_result.deleted_count} stale records.")
+
+            # Insert new Fresh forecasts
             result = collection.insert_many(forecasts)
             logger.info(f"✅ Saved {len(result.inserted_ids)} forecast records to '{FORECAST_COLLECTION}'.")
         else:
             logger.info("No forecasts generated.")
+
+
 
     except Exception as e:
         logger.exception(f"❌ Inference Failed: {e}")

@@ -10,6 +10,7 @@ import wellRoutes from './modules/wells/well.routes.js';
 import readingRoutes from './modules/water-readings/water-reading.routes.js';
 import statsRoutes from './modules/stats/stats.routes.js';
 import rainfallRoutes from './modules/rainfall/rainfall.routes.js';
+import forecastRoutes from './modules/forecasts/forecast.routes.js'; 
 
 const app = express();
 
@@ -53,6 +54,7 @@ app.use('/api/v1/wells', wellRoutes);     // Registers POST /wells and others
 app.use('/api/v1/water-readings', readingRoutes);
 app.use('/api/v1/stats', statsRoutes);
 app.use('/api/v1/rainfall', rainfallRoutes);
+app.use('/api/v1/forecasts', forecastRoutes);
 
 // ==========================================
 // ⚠️ Error Handling Layer
