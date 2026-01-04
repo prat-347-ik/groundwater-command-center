@@ -3,12 +3,13 @@ import pickle
 import json
 import logging
 import subprocess
-from datetime import datetime
+from datetime import datetime,timezone
+import numpy as np  # Added for RMSE calculation
 from typing import Dict, Any, List
 
 import pandas as pd
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error  # Added mean_squared_error
 
 from src.config.mongo_client import mongo_client
 
@@ -95,6 +96,8 @@ def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any
     # Validate using the "future" (test set)
     predictions = model.predict(X_test)
     mae = mean_absolute_error(y_test, predictions)
+    # UPDATED: Calculate RMSE for richer metrics
+    rmse = np.sqrt(mean_squared_error(y_test, predictions))
     
     # 6. Sanity Check: Baseline Comparison (Persistence)
     # Predict t = t-1
@@ -122,7 +125,7 @@ def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any
 
     # Generate Naming: {region_id}_{YYYYMMDD_HHMMSS}_{git_hash}
     # Timestamp is UTC to ensure global consistency
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     base_filename = f"{region_id}_{timestamp}_{git_hash}"
     
     artifact_filename = f"{base_filename}.pkl"
@@ -149,6 +152,7 @@ def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any
         "training_rows": len(train_df),
         "test_rows": len(test_df),
         "mae": round(mae, 4),
+        "rmse": round(rmse, 4), # UPDATED: Included in metadata
         "baseline_mae": round(persistence_mae, 4),
         "artifact_path": artifact_path,
         "metadata_path": metadata_path,
@@ -166,6 +170,31 @@ def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any
     logger.info(f"📄 Metadata saved: {metadata_path}")
 
     return metadata
+
+def save_evaluation_summary(results: List[Dict[str, Any]]):
+    """
+    Writes a transient summary of the latest training run to disk.
+    This file is overwritten every run and allows quick inspection of model health.
+    """
+    summary_path = os.path.join(ARTIFACTS_ROOT, "evaluation_summary.json")
+    
+    summary_data = [
+        {
+            "region_id": r["region_id"],
+            "mae": r["mae"],
+            "rmse": r["rmse"],
+            "baseline_mae": r["baseline_mae"],
+            "trained_at": r["trained_at"],
+            "artifact_path": r["artifact_path"],
+            "metadata_path": r["metadata_path"]
+        }
+        for r in results
+    ]
+    
+    with open(summary_path, 'w') as f:
+        json.dump(summary_data, f, indent=2)
+        
+    logger.info(f"📊 Evaluation summary overwritten: {summary_path}")
 
 def run_training_pipeline():
     """
@@ -188,6 +217,10 @@ def run_training_pipeline():
             metadata = train_region_model(region_id, region_data)
             if metadata:
                 results.append(metadata)
+        
+        # UPDATED: Save Transient Summary (CRITICAL for Gating)
+        if results:
+            save_evaluation_summary(results)
         
         # Save Run Manifest
         # NOTE: We do NOT overwrite 'registry.json' here. 

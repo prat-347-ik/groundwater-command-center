@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 
 # Configure Logger
@@ -72,7 +72,7 @@ def promote_models():
                 "region_id": region_id,
                 "artifact_path": candidate['artifact_path'],
                 "metadata_path": candidate.get('metadata_path', ''), # robust get
-                "promoted_at": datetime.utcnow().isoformat(),
+                "promoted_at": datetime.now(timezone.utc).isoformat(),
                 "metrics": {
                     "mae": mae,
                     "rmse": candidate.get('rmse'),

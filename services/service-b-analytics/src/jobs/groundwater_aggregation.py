@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime, timedelta, timezone
+import sys
 from pymongo import UpdateOne
 from src.config.mongo_client import mongo_client
 from src.schemas.olap_models import DailyRegionGroundwater
@@ -159,3 +160,13 @@ def run_groundwater_aggregation(target_date_str: str):
         logger.info(f"✅ Write Complete: {result.upserted_count} inserted, {result.modified_count} updated.")
     else:
         logger.info("No data to process for this date.")
+
+
+if __name__ == "__main__":
+    # Default to yesterday if no date provided
+    if len(sys.argv) > 1:
+        date_arg = sys.argv[1]
+    else:
+        date_arg = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    run_groundwater_aggregation(date_arg)
