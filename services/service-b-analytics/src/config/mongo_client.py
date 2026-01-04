@@ -28,23 +28,31 @@ class AnalyticsMongoClient:
 
     def connect(self) -> None:
         """
-        Establishes the MongoDB connection.
-        Raises specific errors for connection failures to halt pipelines immediately.
+        Establishes the MongoDB connection with DEBUG logging.
         """
         if not self._uri:
             raise ValueError("MONGO_URI environment variable is not set.")
 
+        # --- DEBUG: Mask the URI to see where we are going ---
+        if "@" in self._uri:
+            # Mask password for safety
+            masked_uri = self._uri.split("@")[1] 
+        else:
+            masked_uri = self._uri
+            
+        logger.info(f"🔌 ATTEMPTING CONNECT: {masked_uri}")
+        logger.info(f"🎯 TARGET DATABASE: {self._olap_db_name}")
+
         try:
-            # Connect with a timeout to fail fast if DB is unreachable
             self._client = MongoClient(
                 self._uri, 
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=5000
             )
             
-            # Lightweight verification command
-            self._client.admin.command('ping')
-            logger.info("✅ Connected to MongoDB successfully.")
+            # Verify connection
+            info = self._client.server_info()
+            logger.info(f"✅ Connected Successfully! Server Version: {info.get('version')}")
             
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
             logger.critical(f"❌ Failed to connect to MongoDB: {e}")

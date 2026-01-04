@@ -7,6 +7,8 @@ __pycache__/
 __pypackages__/
 .DS_Store
 
+.gitignore_global
+
 # --- Service B: Model Versioning & Artifacts ---
 
 # 1. EXCLUDE Heavy Binary Artifacts (Local/S3 storage only)

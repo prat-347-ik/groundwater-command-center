@@ -9,17 +9,16 @@ export const getForecastsByRegion = async (req, res, next) => {
   try {
     const { regionId } = req.params;
 
-    // Fetch forecasts for this region, sorted by date (Earliest -> Latest)
-    // We filter for dates >= today to avoid showing stale history if needed
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    // --- DEBUG FIX: Removed Date Filter ---
+    // We want to see ALL forecasts available for this region to ensure
+    // data is flowing, regardless of whether it's "today" or "tomorrow".
+    
     const forecasts = await Forecast.find({ 
-      region_id: regionId,
-      forecast_date: { $gte: today } 
+      region_id: regionId
+      // forecast_date: { $gte: today }  <-- COMMENTED OUT STRICT FILTER
     })
-    .sort({ forecast_date: 1 })
-    .limit(14); // Limit to 2 weeks max just in case
+    .sort({ forecast_date: 1 }) // Oldest first
+    .limit(14);                 // Show us everything
 
     res.status(200).json({
       success: true,

@@ -120,128 +120,125 @@ def run_inference():
     1. Load Models
     2. Fetch Latest State
     3. Generate 7-Day Forecast (Recursive)
-    4. Save to OLAP
+    4. Save to OLAP (Idempotent: One forecast per region per day)
     """
     try:
-        # 1. Load Model Map
-        model_map = load_model_registry()
-        if not model_map:
-            return
+            # 1. Load Model Map
+            model_map = load_model_registry()
+            if not model_map:
+                return
 
-        # 2. Fetch Latest Features for all trained regions
-        active_regions = list(model_map.keys())
-        latest_df = get_latest_features(active_regions)
-        
-        if latest_df.empty:
-            logger.warning("⚠️ No feature data found. Skipping inference.")
-            return
-
-        forecasts = []
-        
-        logger.info(f"🔮 Generating {FORECAST_HORIZON_DAYS}-day forecasts for {len(latest_df)} regions...")
-
-        for _, row in latest_df.iterrows():
-            region_id = row['region_id']
-            artifact_path = model_map.get(region_id)
+            # 2. Fetch Latest Features
+            active_regions = list(model_map.keys())
+            latest_df = get_latest_features(active_regions)
             
-            # Load Region Model
-            if not artifact_path or not os.path.exists(artifact_path):
-                logger.warning(f"  Skipping {region_id}: Model artifact missing.")
-                continue
-                
-            with open(artifact_path, 'rb') as f:
-                model = pickle.load(f)
+            if latest_df.empty:
+                logger.warning("⚠️ No feature data found. Skipping inference.")
+                return
 
-            # --- Recursive Forecasting Loop ---
-            # We start with the known 'current' state
-            current_date = row['date']
-            
-            # Initialize dynamic features with the latest known values
-            current_trend = row['feat_water_trend_7d']
-            
-            # Rainfall assumptions for future: 0 (Conservative / No-Rain Scenario)
-            # In v2, this would be replaced by a weather service API input.
-            future_rain_1d = 0.0
-            future_rain_7d = 0.0 # Decaying old rain would be better, but 0 is safe baseline
+            forecasts = []
+            logger.info(f"🔮 Generating {FORECAST_HORIZON_DAYS}-day forecasts for {len(latest_df)} regions...")
 
-            for i in range(1, FORECAST_HORIZON_DAYS + 1):
-                forecast_date = current_date + timedelta(days=i)
+            for _, row in latest_df.iterrows():
+                region_id = row['region_id']
+                artifact_path = model_map.get(region_id)
                 
-                # 1. Build Feature Vector
-                seasonality = generate_seasonality_features(forecast_date)
+                if not artifact_path or not os.path.exists(artifact_path):
+                    continue
+                    
+                with open(artifact_path, 'rb') as f:
+                    model = pickle.load(f)
+
+                current_date = row['date']
+                current_trend = row['feat_water_trend_7d']
+                future_rain_1d = 0.0
+                future_rain_7d = 0.0 
+
+                for i in range(1, FORECAST_HORIZON_DAYS + 1):
+                    raw_date = current_date + timedelta(days=i)
+                    # Normalize to Midnight UTC
+                    forecast_date = raw_date.normalize().to_pydatetime()
+                    
+                    seasonality = generate_seasonality_features(raw_date)
+                    
+                    if i == 1:
+                        input_vector = np.array([[
+                            row['feat_rainfall_1d_lag'],
+                            row['feat_rainfall_7d_sum'],
+                            row['feat_water_trend_7d'],
+                            seasonality['feat_sin_day'],
+                            seasonality['feat_cos_day']
+                        ]])
+                    else:
+                        input_vector = np.array([[
+                            future_rain_1d,    
+                            future_rain_7d,    
+                            current_trend,     
+                            seasonality['feat_sin_day'],
+                            seasonality['feat_cos_day']
+                        ]])
+                    
+                    input_df = pd.DataFrame(input_vector, columns=FEATURES)
+                    prediction = model.predict(input_df)[0]
+                    
+                    forecasts.append({
+                        "region_id": region_id,
+                        "forecast_date": forecast_date,
+                        "predicted_level": float(round(prediction, 4)), # Ensure float for BSON
+                        "model_version": "v1.0-linear-baseline",
+                        "created_at": pd.Timestamp.utcnow().to_pydatetime(), # Ensure python datetime
+                        "horizon_step": int(i) # Ensure int
+                    })
+
+            # 4. Save to OLAP with VERIFICATION
+            if forecasts:
+                db = mongo_client.get_olap_db()
+                collection = db[FORECAST_COLLECTION]
                 
-                # Construct Input (Order must match FEATURES list exactly)
-                # Note: For T+1, we could strictly use T's lags if we had them.
-                # Here we simplify: T+1 uses actuals (if i==1), T+n uses assumptions.
-                if i == 1:
-                    # Day 1: Use the actual Lag/Sum from the feature store (which are technically T-1 lags)
-                    # This represents the prediction for "Tomorrow" based on "Today's" known data.
-                    input_vector = np.array([[
-                        row['feat_rainfall_1d_lag'],
-                        row['feat_rainfall_7d_sum'],
-                        row['feat_water_trend_7d'],
-                        seasonality['feat_sin_day'],
-                        seasonality['feat_cos_day']
-                    ]])
-                else:
-                    # Day 2+: Recursive / Assumed inputs
-                    input_vector = np.array([[
-                        future_rain_1d,    # Assume Dry
-                        future_rain_7d,    # Assume Dry
-                        current_trend,     # Assume Momentum Persists (Constant Trend)
-                        seasonality['feat_sin_day'],
-                        seasonality['feat_cos_day']
-                    ]])
+                # --- DEBUG LOGGING ---
+                logger.info(f"💾 TARGET DB: '{db.name}'")
+                logger.info(f"💾 TARGET COLLECTION: '{collection.name}'")
+                logger.info(f"📄 Payload Sample (1st Item): {forecasts[0]}")
+                # ---------------------
                 
-                # 2. Predict
-                # Use DataFrame to pass feature names and avoid sklearn warnings
-                input_df = pd.DataFrame(input_vector, columns=FEATURES)
-                prediction = model.predict(input_df)[0]
+                # IDEMPOTENCY FIX
+                region_ids = list(set(f['region_id'] for f in forecasts))
+                forecast_dates = list(set(f['forecast_date'] for f in forecasts))
                 
-                # 3. Append to Results
-                forecasts.append({
-                    "region_id": region_id,
-                    "forecast_date": forecast_date,
-                    "predicted_level": round(prediction, 4),
-                    "model_version": "v1.0-linear-baseline",
-                    "created_at": pd.Timestamp.utcnow(),
-                    "horizon_step": i
+                logger.info(f"🧹 Clearing overlapping forecasts...")
+                delete_result = collection.delete_many({
+                    "region_id": {"$in": region_ids},
+                    "forecast_date": {"$in": forecast_dates}
                 })
+                logger.info(f"   - Removed {delete_result.deleted_count} stale records.")
 
-# ... (Previous code remains unchanged)
-
-        # 4. Save to OLAP (Idempotent Update)
-        if forecasts:
-            db = mongo_client.get_olap_db()
-            collection = db[FORECAST_COLLECTION]
-            
-            # --- IDEMPOTENCY FIX ---
-            # Group forecasts by region to minimize DB queries
-            region_ids = list(set(f['region_id'] for f in forecasts))
-            forecast_dates = list(set(f['forecast_date'] for f in forecasts))
-            
-            logger.info(f"🧹 Clearing existing forecasts for {len(region_ids)} regions...")
-            
-            # Delete any existing records that match our new batch (Region + Date collision)
-            delete_result = collection.delete_many({
-                "region_id": {"$in": region_ids},
-                "forecast_date": {"$in": forecast_dates}
-            })
-            logger.info(f"   - Removed {delete_result.deleted_count} stale records.")
-
-            # Insert new Fresh forecasts
-            result = collection.insert_many(forecasts)
-            logger.info(f"✅ Saved {len(result.inserted_ids)} forecast records to '{FORECAST_COLLECTION}'.")
-        else:
-            logger.info("No forecasts generated.")
-
-
+                # INSERT
+                result = collection.insert_many(forecasts)
+                logger.info(f"✅ Saved {len(result.inserted_ids)} forecast records.")
+                
+                # --- IMMEDIATE VERIFICATION READ ---
+                logger.info("🕵️ VERIFYING WRITE...")
+                # Query back exactly what we just wrote
+                verify_count = collection.count_documents({
+                    "region_id": {"$in": region_ids}
+                })
+                logger.info(f"📊 Database now contains {verify_count} records for regions {region_ids}")
+                
+                if verify_count == 0:
+                    logger.error("🚨 CRITICAL: Insert reported success, but immediate Read returned 0 records!")
+                # -----------------------------------
+                
+            else:
+                logger.info("No forecasts generated.")
 
     except Exception as e:
-        logger.exception(f"❌ Inference Failed: {e}")
-        raise e
+            logger.exception(f"❌ Inference Failed: {e}")
+            raise e
     finally:
-        mongo_client.close()
+            mongo_client.close()
+
+            # ... (end of run_inference function)
 
 if __name__ == "__main__":
+    # This block is REQUIRED for the orchestrator to trigger the function
     run_inference()

@@ -1,0 +1,28 @@
+{
+  "region_id": "region-001",
+  "model_type": "LinearRegression",
+  "features": [
+    "feat_rainfall_1d_lag",
+    "feat_rainfall_7d_sum",
+    "feat_water_trend_7d",
+    "feat_sin_day",
+    "feat_cos_day"
+  ],
+  "training_rows": 96,
+  "test_rows": 24,
+  "mae": 0.3603,
+  "rmse": 0.4602,
+  "baseline_mae": 0.5581,
+  "artifact_path": "models/v1\\artifacts\\region-001_20260104_144350_5bc9fd9.pkl",
+  "metadata_path": "models/v1\\metadata\\region-001_20260104_144350_5bc9fd9.json",
+  "trained_at": "20260104_144350",
+  "git_hash": "5bc9fd9",
+  "coefficients": {
+    "feat_rainfall_1d_lag": 0.0022,
+    "feat_rainfall_7d_sum": 0.0008,
+    "feat_water_trend_7d": -0.0145,
+    "feat_sin_day": 0.1358,
+    "feat_cos_day": -0.0875
+  },
+  "intercept": 14.9935
+}

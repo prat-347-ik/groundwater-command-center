@@ -1,9 +1,9 @@
 [
   {
     "region_id": "region-001",
-    "artifact_path": "models/v1\\artifacts\\region-001_20260104_105034_12cf70d.pkl",
-    "metadata_path": "models/v1\\metadata\\region-001_20260104_105034_12cf70d.json",
-    "promoted_at": "2026-01-04T10:50:35.375608+00:00",
+    "artifact_path": "models/v1\\artifacts\\region-001_20260104_180619_5bc9fd9.pkl",
+    "metadata_path": "models/v1\\metadata\\region-001_20260104_180619_5bc9fd9.json",
+    "promoted_at": "2026-01-04T18:06:20.293213+00:00",
     "metrics": {
       "mae": 0.3603,
       "rmse": 0.4602,
