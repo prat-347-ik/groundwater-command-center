@@ -1,5 +1,0 @@
-python-dotenv
-pytest
-pytest-mock
-fastapi
-uvicorn
