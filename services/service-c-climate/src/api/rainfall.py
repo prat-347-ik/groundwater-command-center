@@ -1,13 +1,10 @@
-import csv
-import io
-from datetime import datetime
-from typing import Optional, List
-
+from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from pymongo import DESCENDING
 
 from config.database import db
 from models.rainfall import RainfallRecord, RainfallResponse
+from services.ingestion import IngestionService  # <--- Import the new service
 
 router = APIRouter(prefix="/api/v1/rainfall", tags=["Rainfall"])
 
@@ -17,8 +14,6 @@ def create_rainfall_record(record: RainfallRecord):
     Manual Ingestion: Adds a single rainfall record.
     """
     collection = db.get_rainfall_collection()
-    
-    # 1. Insert Data
     result = collection.insert_one(record.model_dump())
     
     return {
@@ -29,52 +24,18 @@ def create_rainfall_record(record: RainfallRecord):
 @router.post("/ingest/csv")
 async def ingest_rainfall_csv(file: UploadFile = File(...)):
     """
-    Bulk Ingestion: Upload a CSV file with columns 'region_id', 'amount_mm'.
+    Bulk Ingestion: Upload a CSV file.
+    Delegates processing to IngestionService.
     """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Invalid file type. Only CSV allowed.")
 
-    content = await file.read()
-    decoded_content = content.decode('utf-8')
-    csv_reader = csv.DictReader(io.StringIO(decoded_content))
-
-    batch = []
-    errors = []
-    row_count = 0
-
-    for row in csv_reader:
-        row_count += 1
-        try:
-            # Basic Validation
-            if 'region_id' not in row or 'amount_mm' not in row:
-                raise ValueError("Missing required columns: region_id, amount_mm")
-
-            # Parse Timestamp (Default to Now if missing)
-            ts = datetime.utcnow()
-            if row.get('timestamp'):
-                ts = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
-
-            record = {
-                "region_id": row['region_id'].strip(),
-                "amount_mm": float(row['amount_mm']),
-                "timestamp": ts,
-                "source": "csv_upload"
-            }
-            batch.append(record)
-
-        except Exception as e:
-            errors.append(f"Row {row_count}: {str(e)}")
-
-    # Bulk Insert
-    if batch:
-        collection = db.get_rainfall_collection()
-        collection.insert_many(batch)
+    # Delegate to Service Layer
+    result = await IngestionService.process_csv(file)
 
     return {
         "message": "CSV Processing Complete",
-        "total_rows_scanned": row_count,
-        "successfully_inserted": len(batch),
-        "errors": errors[:10]  # Return top 10 errors to avoid payload bloat
+        "details": result
     }
 
 @router.get("/", response_model=RainfallResponse)
@@ -83,7 +44,7 @@ def get_rainfall_history(
     limit: int = Query(100, ge=1, le=1000)
 ):
     """
-    Data Serving: Fetch rainfall history (Used by Service B for Analytics).
+    Data Serving: Fetch rainfall history.
     """
     collection = db.get_rainfall_collection()
     query = {}
@@ -96,7 +57,7 @@ def get_rainfall_history(
     
     results = []
     for doc in cursor:
-        doc["_id"] = str(doc["_id"])  # Convert ObjectId to string
+        doc["_id"] = str(doc["_id"])
         results.append(doc)
 
     return {"count": len(results), "data": results}
