@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 
@@ -8,6 +9,7 @@ from src.config.mongo_client import mongo_client
 # Extract Layer
 from src.extract.base_extractor import MongoExtractor
 from src.extract.service_a_adapter import ServiceAAdapter
+from src.extract.service_c_adapter import ServiceCAdapter  # <--- [NEW] Import Service C Adapter
 
 # Transform Layer
 from src.transform.cleaning import (
@@ -30,19 +32,10 @@ from src.load.olap_loader import (
 # Setup Logger
 logger = logging.getLogger(__name__)
 
-def run_daily_pipeline(target_date_str: str):
+async def run_daily_pipeline(target_date_str: str):
     """
     Orchestrates the End-to-End ETL pipeline for a specific date.
-    
-    Flow:
-    1. EXTRACT: Fetch raw data (Target Date + 7 days history for lag features).
-    2. CLEAN: Normalize types, handle nulls, fix timestamps.
-    3. AGGREGATE: Group raw data into daily stats.
-    4. FEATURE: Compute lags, trends, and seasonality.
-    5. LOAD: Write final datasets to OLAP collections.
-    
-    Args:
-        target_date_str (str): Target execution date 'YYYY-MM-DD'.
+    Updated to fetch Rainfall from Service C (Climate Service).
     """
     try:
         # 1. Pipeline Setup & Date Math
@@ -50,7 +43,6 @@ def run_daily_pipeline(target_date_str: str):
         target_date = datetime.strptime(target_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         
         # We need 7 days of history to compute lag features (T-1 to T-7)
-        # So we extract: [Target - 8 days, Target + 1 day)
         history_start = target_date - timedelta(days=8)
         next_day = target_date + timedelta(days=1)
         
@@ -60,28 +52,48 @@ def run_daily_pipeline(target_date_str: str):
         # Initialize Connections
         oltp_db = mongo_client.get_oltp_db()
         extractor = MongoExtractor(oltp_db)
-        adapter = ServiceAAdapter(extractor)
+        service_a = ServiceAAdapter(extractor)
 
-        # 2. EXTRACT (Read-Only from Service A)
+        # 2. EXTRACT
         # ------------------------------------------------------------------
         logger.info("🔍 [Step 1/5] Extracting Raw Data...")
         
-        # Fetch Metadata
-        raw_regions = list(adapter.fetch_regions(active_only=True))
-        # Convert to Lookup Dict for Feature Engineering: {id: critical_level}
+        # A. Fetch Metadata & Groundwater from Service A (Operational)
+        raw_regions = list(service_a.fetch_regions(active_only=True))
+        
+        # Create lookup map for feature engineering
         region_critical_map = {
             r["region_id"]: r.get("critical_level", 0.0) 
             for r in raw_regions
         }
         
-        # Fetch Time-Series Data (Windowed)
-        raw_readings = list(adapter.fetch_water_readings(history_start, next_day))
-        raw_rainfall = list(adapter.fetch_rainfall(history_start, next_day))
+        # Fetch Water Readings (Service A)
+        raw_readings = list(service_a.fetch_water_readings(history_start, next_day))
         
+        # B. Fetch Rainfall from Service C (Climate) -- [UPDATED]
+        raw_rainfall = []
+        days_count = (next_day - history_start).days
+        
+        logger.info(f"   - Fetching climate data from Service C for {len(raw_regions)} regions...")
+        
+        for region in raw_regions:
+            r_id = region["region_id"]
+            # Fetch DataFrame from Service C
+            df_rain = await ServiceCAdapter.get_rainfall_history(r_id, days=days_count)
+            
+            # Convert DataFrame rows back to Dicts for the existing pipeline
+            if not df_rain.empty:
+                for _, row in df_rain.iterrows():
+                    raw_rainfall.append({
+                        "region_id": r_id,
+                        "timestamp": row["date"],   # Adapter standardized this column
+                        "amount_mm": row["rainfall_mm"]
+                    })
+
         logger.info(
             f"   - Fetched {len(raw_regions)} Regions, "
             f"{len(raw_readings)} Readings, "
-            f"{len(raw_rainfall)} Rainfall records."
+            f"{len(raw_rainfall)} Rainfall records (from Service C)."
         )
 
         # 3. CLEAN (Pure Functions)
@@ -96,6 +108,7 @@ def run_daily_pipeline(target_date_str: str):
         
         cleaned_rainfall = []
         for r in raw_rainfall:
+            # We reuse the existing cleaner, ensuring fields match
             res = clean_rainfall_row(r)
             if res is not None:
                 cleaned_rainfall.append(res)
@@ -109,12 +122,10 @@ def run_daily_pipeline(target_date_str: str):
         # ------------------------------------------------------------------
         logger.info("∑  [Step 3/5] Aggregating Daily Stats...")
         
-        # Generate Daily Stats for the whole window (needed for features)
         agg_groundwater = aggregate_daily_groundwater(cleaned_readings)
         agg_rainfall = aggregate_daily_rainfall(cleaned_rainfall)
         
-        # Filter: We only want to LOAD the data for the specific target_date
-        # (But we keep the full history in memory for Step 4)
+        # Filter for Target Date (Load Payload)
         target_gw_payload = [
             row for row in agg_groundwater 
             if row['date'] == target_date
@@ -133,14 +144,12 @@ def run_daily_pipeline(target_date_str: str):
         # ------------------------------------------------------------------
         logger.info("🧠 [Step 4/5] Engineering Features...")
         
-        # Pass the FULL history to generate lags/trends
         all_features = generate_region_features(
             agg_groundwater, 
             agg_rainfall, 
             region_critical_map
         )
         
-        # Filter output to only save the requested day
         target_features_payload = [
             row for row in all_features 
             if row['date'] == target_date
@@ -165,16 +174,14 @@ def run_daily_pipeline(target_date_str: str):
 
     except Exception as e:
         logger.exception(f"❌ Pipeline Failed: {str(e)}")
-        # Fail Fast: Raise error to ensure scheduler marks job as failed
         raise e
     finally:
-        # Close DB Connection
         mongo_client.close()
 
 if __name__ == "__main__":
-    # Simple CLI for manual testing
     import sys
+    # Use asyncio.run to execute the async pipeline
     if len(sys.argv) > 1:
-        run_daily_pipeline(sys.argv[1])
+        asyncio.run(run_daily_pipeline(sys.argv[1]))
     else:
         print("Usage: python daily_summary.py YYYY-MM-DD")

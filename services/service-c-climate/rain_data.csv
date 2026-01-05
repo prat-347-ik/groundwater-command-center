@@ -1,0 +1,4 @@
+region_id,amount_mm,timestamp
+region-001,12.0,2025-01-01T10:00:00
+region-001,0.0,2025-01-02T10:00:00
+region-002,5.5,2025-01-01T10:00:00
