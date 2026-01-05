@@ -47,7 +47,7 @@ app.get('/health', (req, res) => {
 app.post('/api/v1/pipeline/trigger', async (req, res, next) => {
   try {
     // Defines where Service C lives (Default to 8100 as fixed previously)
-    const SERVICE_C_URL = process.env.SERVICE_C_URL || 'http://localhost:8100';
+    const SERVICE_C_URL = process.env.SERVICE_C_URL || 'http://localhost:8200';
 
     console.log(`[Proxy] Forwarding trigger request to ${SERVICE_C_URL}/pipeline/trigger`);
 
