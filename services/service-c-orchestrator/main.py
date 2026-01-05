@@ -74,5 +74,5 @@ def trigger_pipeline(background_tasks: BackgroundTasks):
 
 if __name__ == "__main__":
     import uvicorn
-    # Run on port 8002 to avoid conflict with Service A (8000/8001)
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    # Run on port 8100 to avoid conflict with Service A (8000/8001)
+    uvicorn.run(app, host="0.0.0.0", port=8100)
