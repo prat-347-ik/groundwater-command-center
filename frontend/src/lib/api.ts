@@ -1,8 +1,7 @@
-// src/lib/api.ts
 import { Region, WaterReading, Forecast, ApiResponse } from '@/types';
 
-const SERVICE_A_URL = process.env.NEXT_PUBLIC_SERVICE_A_URL || 'http://localhost:4000/api/v1';
-const SERVICE_C_URL = process.env.NEXT_PUBLIC_SERVICE_C_URL || 'http://localhost:8002';
+// Service A acts as the Gateway for all requests
+const SERVICE_A_URL = process.env.NEXT_PUBLIC_SERVICE_A_URL || 'http://localhost:8000/api/v1';
 
 // --- Service A: Data Retrieval ---
 
@@ -13,7 +12,6 @@ export async function fetchRegions(): Promise<ApiResponse<Region[]>> {
 }
 
 export async function fetchHistoricalData(regionId: string): Promise<ApiResponse<WaterReading[]>> {
-  // Fetch only active readings for the specific region
   const res = await fetch(`${SERVICE_A_URL}/water-readings?region_id=${regionId}`, { 
     cache: 'no-store' 
   });
@@ -29,17 +27,22 @@ export async function fetchForecasts(regionId: string): Promise<ApiResponse<Fore
   return res.json();
 }
 
-// --- Service C: Orchestration ---
+// --- Orchestration (Proxied via Service A) ---
 
-export async function triggerPipeline() {
-  const res = await fetch(`${SERVICE_C_URL}/pipeline/trigger`, {
+export async function triggerPipeline(date?: string) {
+  // We send the request to Service A, which proxies it to Service B (Analytics)
+  const payload = date ? { date } : {};
+
+  const res = await fetch(`${SERVICE_A_URL}/pipeline/trigger`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
   
   if (!res.ok) {
     const errorData = await res.json();
-    throw new Error(errorData.detail || 'Pipeline trigger failed');
+    // Handle both Python (FastAPI) 'detail' and Node (Express) 'message' error formats
+    throw new Error(errorData.detail || errorData.message || 'Pipeline trigger failed');
   }
   return res.json();
 }
