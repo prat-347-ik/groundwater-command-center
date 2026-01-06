@@ -175,8 +175,6 @@ async def run_daily_pipeline(target_date_str: str):
     except Exception as e:
         logger.exception(f"❌ Pipeline Failed: {str(e)}")
         raise e
-    finally:
-        mongo_client.close()
 
 if __name__ == "__main__":
     import sys

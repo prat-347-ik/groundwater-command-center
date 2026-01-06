@@ -234,11 +234,10 @@ def run_inference():
     except Exception as e:
             logger.exception(f"❌ Inference Failed: {e}")
             raise e
-    finally:
-            mongo_client.close()
 
-            # ... (end of run_inference function)
 
+# ✅ FIX: REMOVED THE 'finally: mongo_client.close()' BLOCK
+    # The connection must remain open.
 if __name__ == "__main__":
     # This block is REQUIRED for the orchestrator to trigger the function
     run_inference()

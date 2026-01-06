@@ -97,7 +97,7 @@ async def run_full_pipeline_logic(date: str):
     run_sync_job_safe(promote_models, "Step 3: Promotion")
     run_sync_job_safe(run_inference, "Step 4: Forecasting")
 
-@app.post("/pipeline/run")
+@app.post("/jobs/pipeline")
 async def trigger_full_pipeline(request: PipelineRequest, background_tasks: BackgroundTasks):
     target_date = request.date or "today"
     background_tasks.add_task(run_full_pipeline_logic, target_date)
