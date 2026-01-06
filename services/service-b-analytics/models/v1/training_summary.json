@@ -2,8 +2,8 @@
   {
     "region_id": "region-001",
     "model_type": "LinearRegression",
-    "artifact_path": "models/v1\\region-001_20260106_144603.pkl",
-    "created_at": "2026-01-06T14:46:03.841125+00:00",
+    "artifact_path": "models/v1\\region-001_20260106_172323.pkl",
+    "created_at": "2026-01-06T17:23:23.361496+00:00",
     "metrics": {
       "mae": 0.36032819512791936,
       "rmse": 0.4601743692635848,

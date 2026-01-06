@@ -3,7 +3,7 @@
     "region_id": "region-001",
     "artifact_path": "models/v1\\artifacts\\region-001_20260105_113911_95b34dd.pkl",
     "metadata_path": "models/v1\\metadata\\region-001_20260105_113911_95b34dd.json",
-    "promoted_at": "2026-01-06T14:46:18.952976+00:00",
+    "promoted_at": "2026-01-06T17:23:23.365892+00:00",
     "metrics": {
       "mae": 0.3603,
       "rmse": 0.4602,
