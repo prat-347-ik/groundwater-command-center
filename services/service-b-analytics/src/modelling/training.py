@@ -2,15 +2,16 @@ import os
 import pickle
 import json
 import logging
-import subprocess
-from datetime import datetime,timezone
-import numpy as np  # Added for RMSE calculation
+import pandas as pd
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
-import pandas as pd
+# Machine Learning Imports
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error  # Added mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import numpy as np
 
+# Database
 from src.config.mongo_client import mongo_client
 
 # Configure Logger
@@ -18,7 +19,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-# Root directory for the model versioning system
 ARTIFACTS_ROOT = "models/v1"
 FEATURES = [
     'feat_rainfall_1d_lag', 
@@ -35,13 +35,14 @@ def fetch_training_data() -> pd.DataFrame:
     """
     Fetches the complete feature store from the OLAP database.
     """
+    # ✅ FIX: Get DB reference inside the function
     db = mongo_client.get_olap_db()
+    
     # Fetch only necessary fields to optimize I/O
     projection = {f: 1 for f in FEATURES}
     projection[TARGET] = 1
     projection['region_id'] = 1
     projection['date'] = 1
-    projection['_id'] = 0
     
     logger.info("📡 Fetching data from region_feature_store...")
     cursor = db.region_feature_store.find({}, projection)
@@ -49,152 +50,73 @@ def fetch_training_data() -> pd.DataFrame:
     df = pd.DataFrame(list(cursor))
     
     if df.empty:
-        raise ValueError("No training data found in region_feature_store.")
+        logger.warning("⚠️ No training data found in OLAP.")
+        return pd.DataFrame()
         
-    # Ensure date is datetime for sorting
-    df['date'] = pd.to_datetime(df['date'])
     return df
 
-def train_region_model(region_id: str, df_region: pd.DataFrame) -> Dict[str, Any]:
+def train_region_model(region_id: str, df: pd.DataFrame) -> Dict[str, Any]:
     """
-    Trains a Linear Regression model for a single region using time-based split.
-    
-    Args:
-        region_id: Unique identifier for the region.
-        df_region: DataFrame containing data ONLY for this region.
-        
-    Returns:
-        Metadata dictionary if successful, None otherwise.
+    Trains a Linear Regression model for a specific region.
+    Returns metadata dict if successful, None otherwise.
     """
-    # 1. Sort by Date (CRITICAL for time-series)
-    # Strict chronological order prevents future leakage
-    df_region = df_region.sort_values('date').reset_index(drop=True)
+    # 1. Sort & Preprocess
+    df = df.sort_values('date').dropna()
     
-    # 2. Check Minimum History
-    if len(df_region) < MIN_HISTORY_DAYS:
-        logger.warning(f"⚠️ Region {region_id}: Skipped (Insufficient history: {len(df_region)} days)")
+    if len(df) < MIN_HISTORY_DAYS:
+        logger.warning(f"⚠️ Skipping {region_id}: Insufficient data ({len(df)} rows)")
         return None
-
-    # 3. Time-Based Split
-    # No random shuffling!
-    split_idx = int(len(df_region) * TRAIN_SPLIT_RATIO)
-    
-    train_df = df_region.iloc[:split_idx]
-    test_df = df_region.iloc[split_idx:]
+        
+    # 2. Split Data (Chronological Split)
+    split_idx = int(len(df) * TRAIN_SPLIT_RATIO)
+    train_df = df.iloc[:split_idx]
+    test_df = df.iloc[split_idx:]
     
     X_train = train_df[FEATURES]
     y_train = train_df[TARGET]
     X_test = test_df[FEATURES]
     y_test = test_df[TARGET]
-
-    # 4. Train Model (Linear Regression)
-    # We use OLS (Ordinary Least Squares) as defined in the baseline contract
+    
+    # 3. Train Model
     model = LinearRegression()
     model.fit(X_train, y_train)
-
-    # 5. Evaluate (MAE)
-    # Validate using the "future" (test set)
+    
+    # 4. Evaluate (Validation)
     predictions = model.predict(X_test)
     mae = mean_absolute_error(y_test, predictions)
-    # UPDATED: Calculate RMSE for richer metrics
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
     
-    # 6. Sanity Check: Baseline Comparison (Persistence)
-    # Predict t = t-1
-    persistence_pred = test_df[TARGET].shift(1)
-    # Drop first row of test set for fair comparison (due to shift NaNs)
-    valid_indices = persistence_pred.dropna().index
-    persistence_mae = mean_absolute_error(test_df.loc[valid_indices, TARGET], persistence_pred.loc[valid_indices])
+    logger.info(f"✅ Trained {region_id} | MAE: {mae:.4f} | RMSE: {rmse:.4f}")
     
-    logger.info(f"✅ Region {region_id}: MAE={mae:.4f} (Baseline={persistence_mae:.4f})")
-
-    # 7. Save Artifacts & Metadata (Versioning Logic)
-    # ---------------------------------------------------------
-    # Define sub-directories
-    artifacts_dir = os.path.join(ARTIFACTS_ROOT, "artifacts")
-    metadata_dir = os.path.join(ARTIFACTS_ROOT, "metadata")
-    os.makedirs(artifacts_dir, exist_ok=True)
-    os.makedirs(metadata_dir, exist_ok=True)
-
-    # Retrieve Git Hash for Lineage
-    # This binds the code version to the binary artifact
-    try:
-        git_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).decode('ascii').strip()
-    except Exception:
-        git_hash = "nohash"
-
-    # Generate Naming: {region_id}_{YYYYMMDD_HHMMSS}_{git_hash}
-    # Timestamp is UTC to ensure global consistency
+    # 5. Save Artifact
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    base_filename = f"{region_id}_{timestamp}_{git_hash}"
+    filename = f"{region_id}_{timestamp}.pkl"
+    filepath = os.path.join(ARTIFACTS_ROOT, filename)
     
-    artifact_filename = f"{base_filename}.pkl"
-    metadata_filename = f"{base_filename}.json"
-    
-    artifact_path = os.path.join(artifacts_dir, artifact_filename)
-    metadata_path = os.path.join(metadata_dir, metadata_filename)
-    
-    # Safety Check: Never overwrite existing files (Immutability)
-    if os.path.exists(artifact_path):
-        logger.error(f"⛔ Artifact collision detected: {artifact_path}")
-        raise FileExistsError(f"Artifact {artifact_path} already exists. Aborting to maintain immutability.")
-    
-    # Save Binary Artifact
-    with open(artifact_path, 'wb') as f:
+    with open(filepath, 'wb') as f:
         pickle.dump(model, f)
-
-    # 8. Prepare & Save Metadata
-    # This file provides the audit trail for the binary
-    metadata = {
+        
+    # 6. Return Metadata
+    return {
         "region_id": region_id,
         "model_type": "LinearRegression",
+        "artifact_path": filepath,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "metrics": {
+            "mae": mae,
+            "rmse": rmse,
+            "train_size": len(train_df),
+            "test_size": len(test_df)
+        },
         "features": FEATURES,
-        "training_rows": len(train_df),
-        "test_rows": len(test_df),
-        "mae": round(mae, 4),
-        "rmse": round(rmse, 4), # UPDATED: Included in metadata
-        "baseline_mae": round(persistence_mae, 4),
-        "artifact_path": artifact_path,
-        "metadata_path": metadata_path,
-        "trained_at": timestamp,
-        "git_hash": git_hash,
-        "coefficients": {feat: round(coef, 4) for feat, coef in zip(FEATURES, model.coef_)},
-        "intercept": round(model.intercept_, 4)
+        "status": "candidate" # Needs to pass gating to become active
     }
 
-    # Save Metadata JSON
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2)
-
-    logger.info(f"💾 Artifact saved: {artifact_path}")
-    logger.info(f"📄 Metadata saved: {metadata_path}")
-
-    return metadata
-
-def save_evaluation_summary(results: List[Dict[str, Any]]):
-    """
-    Writes a transient summary of the latest training run to disk.
-    This file is overwritten every run and allows quick inspection of model health.
-    """
-    summary_path = os.path.join(ARTIFACTS_ROOT, "evaluation_summary.json")
-    
-    summary_data = [
-        {
-            "region_id": r["region_id"],
-            "mae": r["mae"],
-            "rmse": r["rmse"],
-            "baseline_mae": r["baseline_mae"],
-            "trained_at": r["trained_at"],
-            "artifact_path": r["artifact_path"],
-            "metadata_path": r["metadata_path"]
-        }
-        for r in results
-    ]
-    
+def save_evaluation_summary(results: List[Dict]):
+    """Saves a summary of the training run for the Gating process."""
+    summary_path = os.path.join(ARTIFACTS_ROOT, "training_summary.json")
     with open(summary_path, 'w') as f:
-        json.dump(summary_data, f, indent=2)
-        
-    logger.info(f"📊 Evaluation summary overwritten: {summary_path}")
+        json.dump(results, f, indent=2)
 
 def run_training_pipeline():
     """
@@ -207,6 +129,10 @@ def run_training_pipeline():
         # Load Data
         df = fetch_training_data()
         
+        if df.empty:
+            logger.warning("❌ Aborting training: No data available.")
+            return
+
         # Group by Region (Split-Apply-Combine strategy)
         regions = df['region_id'].unique()
         logger.info(f"🔄 Starting training for {len(regions)} regions...")
@@ -218,13 +144,11 @@ def run_training_pipeline():
             if metadata:
                 results.append(metadata)
         
-        # UPDATED: Save Transient Summary (CRITICAL for Gating)
+        # Save Transient Summary (CRITICAL for Gating)
         if results:
             save_evaluation_summary(results)
         
         # Save Run Manifest
-        # NOTE: We do NOT overwrite 'registry.json' here. 
-        # Promotion to registry is a separate gated process.
         manifest_path = os.path.join(ARTIFACTS_ROOT, "latest_run_manifest.json")
         with open(manifest_path, 'w') as f:
             json.dump(results, f, indent=2)
@@ -233,9 +157,9 @@ def run_training_pipeline():
         
     except Exception as e:
         logger.exception(f"❌ Training Pipeline Failed: {e}")
+        # Note: Do NOT raise e here if you want the API to continue running other tasks,
+        # but raising it helps the API wrapper know it failed.
         raise e
-    finally:
-        mongo_client.close()
-
-if __name__ == "__main__":
-    run_training_pipeline()
+    
+    # ✅ FIX: REMOVED THE 'finally: mongo_client.close()' BLOCK
+    # The connection must remain open for the next API call.
