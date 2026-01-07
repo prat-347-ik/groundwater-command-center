@@ -9,7 +9,7 @@ from src.config.mongo_client import mongo_client
 # Extract Layer
 from src.extract.base_extractor import MongoExtractor
 from src.extract.service_a_adapter import ServiceAAdapter
-from src.extract.service_c_adapter import ServiceCAdapter  # <--- [NEW] Import Service C Adapter
+from src.extract.service_c_adapter import ServiceCAdapter
 
 # Transform Layer
 from src.transform.cleaning import (
@@ -35,12 +35,17 @@ logger = logging.getLogger(__name__)
 async def run_daily_pipeline(target_date_str: str):
     """
     Orchestrates the End-to-End ETL pipeline for a specific date.
-    Updated to fetch Rainfall from Service C (Climate Service).
     """
     try:
         # 1. Pipeline Setup & Date Math
         # ------------------------------------------------------------------
-        target_date = datetime.strptime(target_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # FIX: Handle "today" keyword dynamically
+        if target_date_str == "today":
+            # Get current UTC date at midnight
+            target_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            # Parse strict YYYY-MM-DD
+            target_date = datetime.strptime(target_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
         
         # We need 7 days of history to compute lag features (T-1 to T-7)
         history_start = target_date - timedelta(days=8)
@@ -61,7 +66,6 @@ async def run_daily_pipeline(target_date_str: str):
         # A. Fetch Metadata & Groundwater from Service A (Operational)
         raw_regions = list(service_a.fetch_regions(active_only=True))
         
-        # Create lookup map for feature engineering
         region_critical_map = {
             r["region_id"]: r.get("critical_level", 0.0) 
             for r in raw_regions
@@ -70,7 +74,7 @@ async def run_daily_pipeline(target_date_str: str):
         # Fetch Water Readings (Service A)
         raw_readings = list(service_a.fetch_water_readings(history_start, next_day))
         
-        # B. Fetch Rainfall from Service C (Climate) -- [UPDATED]
+        # B. Fetch Rainfall from Service C (Climate)
         raw_rainfall = []
         days_count = (next_day - history_start).days
         
@@ -81,12 +85,11 @@ async def run_daily_pipeline(target_date_str: str):
             # Fetch DataFrame from Service C
             df_rain = await ServiceCAdapter.get_rainfall_history(r_id, days=days_count)
             
-            # Convert DataFrame rows back to Dicts for the existing pipeline
             if not df_rain.empty:
                 for _, row in df_rain.iterrows():
                     raw_rainfall.append({
                         "region_id": r_id,
-                        "timestamp": row["date"],   # Adapter standardized this column
+                        "timestamp": row["date"],
                         "amount_mm": row["rainfall_mm"]
                     })
 
@@ -108,7 +111,6 @@ async def run_daily_pipeline(target_date_str: str):
         
         cleaned_rainfall = []
         for r in raw_rainfall:
-            # We reuse the existing cleaner, ensuring fields match
             res = clean_rainfall_row(r)
             if res is not None:
                 cleaned_rainfall.append(res)
