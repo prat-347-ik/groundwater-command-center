@@ -32,3 +32,30 @@ export interface ApiResponse<T> {
   count?: number;
   data: T;
 }
+
+
+export interface RainfallReading {
+  _id?: string;
+  region_id: string;
+  timestamp: string;
+  amount_mm: number;
+  source: string;
+}
+
+export interface SystemHealth {
+  service: string;
+  status: 'UP' | 'DOWN';
+  timestamp: string;
+}
+
+export interface JobResponse {
+  status: string;
+  job: string;
+  message?: string;
+}
+
+export interface ApiResponse<T> {
+  count?: number;
+  data: T;
+  message?: string;
+}
