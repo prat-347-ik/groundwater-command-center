@@ -1,60 +1,58 @@
 import pandas as pd
 from typing import List, Dict, Any
 
-def aggregate_daily_groundwater(cleaned_readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+# --- [NEW] Streaming Aggregator Class ---
+class GroundwaterStreamAggregator:
     """
-    Aggregates cleaned water readings into daily regional statistics.
-    
-    Logic:
-    - Group by (region_id, date)
-    - Calculate arithmetic mean, min, max for water_level
-    - Count total readings
-    - Count unique reporting wells
-    
-    Args:
-        cleaned_readings: List of dicts with keys ['date', 'region_id', 'well_id', 'water_level']
-        
-    Returns:
-        List of dicts matching the partial DailyRegionGroundwater schema.
+    Stateful aggregator to process water readings row-by-row.
+    Eliminates the need to hold all raw rows in memory.
     """
-    if not cleaned_readings:
-        return []
+    def __init__(self):
+        # Key: (region_id, date)
+        # Value: {sum, count, min, max, wells (set)}
+        self.groups = {}
 
-    df = pd.DataFrame(cleaned_readings)
+    def consume(self, row: Dict[str, Any]):
+        """Ingest a single cleaned row and update running stats."""
+        key = (row['region_id'], row['date'])
+        val = row['water_level']
+        well_id = row['well_id']
 
-    # Grouping
-    # As_index=False ensures columns are preserved in the output DataFrame
-    grouped = df.groupby(['region_id', 'date'], as_index=False).agg(
-        avg_water_level=('water_level', 'mean'),
-        min_water_level=('water_level', 'min'),
-        max_water_level=('water_level', 'max'),
-        reading_count=('water_level', 'count'),
-        reporting_wells_count=('well_id', 'nunique')
-    )
+        if key not in self.groups:
+            self.groups[key] = {
+                'sum': 0.0,
+                'count': 0,
+                'min': val,
+                'max': val,
+                'wells': {well_id} # Set for unique counting
+            }
+        else:
+            stats = self.groups[key]
+            stats['sum'] += val
+            stats['count'] += 1
+            if val < stats['min']: stats['min'] = val
+            if val > stats['max']: stats['max'] = val
+            stats['wells'].add(well_id)
 
-    # Rounding for precision consistency (optional but recommended for floats)
-    grouped['avg_water_level'] = grouped['avg_water_level'].round(2)
-    grouped['min_water_level'] = grouped['min_water_level'].round(2)
-    grouped['max_water_level'] = grouped['max_water_level'].round(2)
+    def get_results(self) -> List[Dict[str, Any]]:
+        """Finalize aggregations and return the schema-compliant list."""
+        results = []
+        for (region_id, date), stats in self.groups.items():
+            results.append({
+                'region_id': region_id,
+                'date': date,
+                'avg_water_level': round(stats['sum'] / stats['count'], 2),
+                'min_water_level': round(stats['min'], 2),
+                'max_water_level': round(stats['max'], 2),
+                'reading_count': stats['count'],
+                'reporting_wells_count': len(stats['wells'])
+            })
+        return results
 
-    return grouped.to_dict('records')
-
+# --- Existing Function (Kept for Rainfall or small batches) ---
 def aggregate_daily_rainfall(cleaned_rainfall: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Aggregates cleaned rainfall data into daily regional totals.
-    
-    Logic:
-    - Group by (region_id, date)
-    - Sum total rainfall
-    - Identify max single reading (storm detection)
-    - Calculate intensity (total / count)
-    - Determine primary source (mode) and source diversity
-    
-    Args:
-        cleaned_rainfall: List of dicts with keys ['date', 'region_id', 'amount_mm', 'source']
-        
-    Returns:
-        List of dicts matching the partial DailyRegionRainfall schema.
     """
     if not cleaned_rainfall:
         return []
@@ -66,18 +64,15 @@ def aggregate_daily_rainfall(cleaned_rainfall: List[Dict[str, Any]]) -> List[Dic
         mode = series.mode()
         return mode.iloc[0] if not mode.empty else "unknown"
 
-    # Grouping
     grouped = df.groupby(['region_id', 'date'], as_index=False).agg(
         total_rainfall_mm=('amount_mm', 'sum'),
         max_single_reading_mm=('amount_mm', 'max'),
         reading_count=('amount_mm', 'count'),
         unique_source_count=('source', 'nunique'),
         primary_source=('source', get_primary_source),
-        data_sources=('source', lambda x: list(set(x))) # Capture unique list for audit
+        data_sources=('source', lambda x: list(set(x)))
     )
 
-    # Derived Feature: Rainfall Intensity
-    # Avoid division by zero (though reading_count >= 1 due to groupby)
     grouped['rainfall_intensity_mm'] = (
         grouped['total_rainfall_mm'] / grouped['reading_count']
     ).round(2)
@@ -85,9 +80,6 @@ def aggregate_daily_rainfall(cleaned_rainfall: List[Dict[str, Any]]) -> List[Dic
     grouped['total_rainfall_mm'] = grouped['total_rainfall_mm'].round(2)
     grouped['max_single_reading_mm'] = grouped['max_single_reading_mm'].round(2)
 
-    # Cleanup intermediate field if not needed in final schema (reading_count is used for intensity)
-    # The schema 'DailyRegionRainfall' does not strictly require 'reading_count' 
-    # but uses 'rainfall_intensity_mm'. We keep the dict clean.
     output_cols = [
         'region_id', 'date', 'total_rainfall_mm', 
         'max_single_reading_mm', 'rainfall_intensity_mm', 

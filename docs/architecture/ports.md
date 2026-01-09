@@ -44,11 +44,11 @@ This document serves as the **Single Source of Truth** for network ports used in
 
 | Component | Port | Protocol | Status | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Frontend** | `5173` | HTTP | ✅ Active | Default Vite Server |
-| **Service A** | `4000` | HTTP | ✅ Active | Operational API |
+| **Frontend** | `3000` | HTTP | ✅ Active | Default Vite Server |
+| **Service A** | `8100` | HTTP | ✅ Active | Operational API |
 | **Service B** | — | — | ✅ Active | Batch Job (No Port) |
 | **Service B API**| `5001` | HTTP | 🔒 Reserved | For future ML inference |
-| **Service C** | `5002` | HTTP | 🔒 Reserved | For future Climate service |
+| **Service C** | `8200` | HTTP | 🔒 Reserved | For future Climate service |
 | **MongoDB** | `27017` | TCP | ✅ Active | Local Development |
 
 ---

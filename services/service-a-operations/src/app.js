@@ -10,6 +10,7 @@ import wellRoutes from './modules/wells/well.routes.js';
 import readingRoutes from './modules/water-readings/water-reading.routes.js';
 import statsRoutes from './modules/stats/stats.routes.js';
 import forecastRoutes from './modules/forecasts/forecast.routes.js'; 
+import pipelineRoutes from './modules/pipeline/pipeline.routes.js'; // <--- [NEW]
 // NOTE: Rainfall is now proxied to Service C, so we don't import it locally.
 
 const app = express();
@@ -129,6 +130,7 @@ app.use('/api/v1/wells', wellRoutes);
 app.use('/api/v1/water-readings', readingRoutes);
 app.use('/api/v1/stats', statsRoutes);
 app.use('/api/v1/forecasts', forecastRoutes);
+app.use('/api/v1/pipeline', pipelineRoutes); // <--- [NEW]
 
 // ==========================================
 // ⚠️ Error Handling Layer
