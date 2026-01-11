@@ -13,6 +13,7 @@ import PipelineControls from '@/components/dashboard/PipelineControls';
 import DataIngestion from '@/components/dashboard/DataIngestion';
 import KPIGrid from '@/components/dashboard/KPIGrid';
 import SystemHealth from '@/components/dashboard/SystemHealth';
+import Groundwater3DScene from '@/components/dashboard/Groundwater3DScene'; // <--- [NEW] Import 3D Scene
 
 export default function DashboardPage() {
   // --- Global State ---
@@ -82,6 +83,12 @@ export default function DashboardPage() {
 
   const currentRegion = regions.find(r => r.region_id === selectedRegionId);
 
+  // [NEW] Helper: Get latest values for 3D Scene
+  // We assume the data is sorted or we take the last entry as "current"
+  const latestWaterLevel = history.length > 0 ? history[history.length - 1].water_level : 0;
+  // If rainfall data is daily, we might just show the last record's intensity
+  const latestRainfall = rainfall.length > 0 ? rainfall[rainfall.length - 1].amount_mm : 0;
+
   return (
     // UPDATED: Changed background to bg-slate-100 for better contrast with white cards
     <main className="min-h-screen bg-slate-100 p-6 md:p-8 pb-16 relative text-slate-900 font-sans">
@@ -141,18 +148,32 @@ export default function DashboardPage() {
             {/* Analytics Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
               
-              {/* Left: Charts */}
+              {/* Left Column: Main Charts (Takes up 2/3 width) */}
               <div className="lg:col-span-2 space-y-6">
                 <HydroComboChart 
                   history={history} 
-                  forecasts={forecasts}
+                  forecasts={forecasts} 
                   rainfall={rainfall}
                   criticalLevel={currentRegion?.critical_level || 0} 
                 />
               </div>
 
-              {/* Right: Operations */}
+              {/* Right Column: 3D Visualization & Operations (Takes up 1/3 width) */}
               <div className="space-y-6">
+                
+                {/* [NEW] 3D Groundwater Visualization */}
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-bold text-slate-800">Live Digital Twin</h3>
+                    <p className="text-xs text-slate-500">3D Simulation of Aquifer Depth & Rainfall</p>
+                  </div>
+                  <Groundwater3DScene 
+                    waterLevel={latestWaterLevel} 
+                    rainfall={latestRainfall} 
+                  />
+                </div>
+
+                {/* Operations Controls */}
                 <PipelineControls />
                 <DataIngestion />
               </div>
