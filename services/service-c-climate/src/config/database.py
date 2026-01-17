@@ -21,6 +21,10 @@ class Database:
     def get_rainfall_collection(self):
         """Returns the specific collection for Rainfall data."""
         return self.db["rainfall"]
+    
+    def get_weather_collection(self):
+        """Returns the specific collection for Weather data."""
+        return self.db["weather"]
 
     def close(self):
         """Closes the connection."""

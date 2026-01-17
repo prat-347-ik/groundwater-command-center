@@ -2,117 +2,155 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
 
+def calculate_evapotranspiration(temp_c, humidity):
+    """
+    Simplified Hargreaves/PM estimation.
+    Higher temp & lower humidity = Higher loss.
+    """
+    if pd.isna(temp_c) or pd.isna(humidity):
+        return 0.0
+    
+    # 100% Humidity = 0 Deficit (No evaporation)
+    # 0% Humidity = 1.0 Deficit (Max evaporation)
+    saturation_deficit = (100 - humidity) / 100.0
+    
+    # 0.05 is a calibration constant for daily mm loss per degree C
+    return max(0, 0.05 * temp_c * saturation_deficit)
+
 def generate_region_features(
     groundwater_data: List[Dict[str, Any]], 
     rainfall_data: List[Dict[str, Any]],
-    static_critical_levels: Dict[str, float]
+    weather_data: List[Dict[str, Any]],     # 🆕
+    extraction_data: List[Dict[str, Any]],  # 🆕
+    region_metadata: Dict[str, Any]         # 🆕 Needs full metadata now
 ) -> List[Dict[str, Any]]:
     """
-    Combines daily aggregations into a ML-ready feature set.
+    Combines daily aggregations into a Physics-Informed ML feature set.
     
-    Operations:
-    1. Merge Groundwater (Target) and Rainfall (Features).
-    2. Sort by Date.
-    3. Generate Rolling/Lagged Features (Strictly Validated to avoid Leakage).
-    4. Generate Seasonality Features.
-    5. Drop rows with NaN (insufficient history).
-    
-    Args:
-        groundwater_data: List of DailyRegionGroundwater dicts.
-        rainfall_data: List of DailyRegionRainfall dicts.
-        static_critical_levels: Dict mapping region_id -> critical_level (from Metadata).
-        
-    Returns:
-        List of RegionFeatureStore dicts ready for insertion.
+    Phase 3 Upgrades:
+    - Effective Rainfall = Rain - Evapotranspiration
+    - Net Flux = Effective Rainfall - Extraction
+    - Dynamic Lags based on Soil Permeability
     """
-    if not groundwater_data or not rainfall_data:
+    if not groundwater_data:
         return []
 
-    # 1. Convert to DataFrames
+    # 1. Convert to DataFrames & Standardize Dates
     gw_df = pd.DataFrame(groundwater_data)
-    rf_df = pd.DataFrame(rainfall_data)
+    gw_df['date'] = pd.to_datetime(gw_df['date']).dt.normalize()
     
-    # Ensure Dates are Datetime objects
-    gw_df['date'] = pd.to_datetime(gw_df['date'])
-    rf_df['date'] = pd.to_datetime(rf_df['date'])
+    # Rainfall
+    rf_df = pd.DataFrame(rainfall_data) if rainfall_data else pd.DataFrame(columns=['timestamp', 'amount_mm'])
+    if not rf_df.empty and 'date' not in rf_df.columns:
+        # Handle cases where source is 'timestamp' vs 'date'
+        col = 'timestamp' if 'timestamp' in rf_df.columns else 'date'
+        rf_df['date'] = pd.to_datetime(rf_df[col]).dt.normalize()
+        # Aggregate hourly rain to daily
+        if 'amount_mm' in rf_df.columns:
+            rf_df = rf_df.groupby('date')['amount_mm'].sum().reset_index()
+        elif 'rainfall_mm' in rf_df.columns:
+             rf_df = rf_df.groupby('date')['rainfall_mm'].sum().reset_index()
+             rf_df.rename(columns={'rainfall_mm': 'amount_mm'}, inplace=True)
 
-    # 2. Merge DataFrames on (region_id, date)
-    # Using Inner Join: We need both Water (Target) and Rain (Features) to train
-    merged_df = pd.merge(
-        gw_df[['date', 'region_id', 'avg_water_level']],
-        rf_df[['date', 'region_id', 'total_rainfall_mm']],
-        on=['date', 'region_id'],
-        how='inner'
+    # Weather (Temp/Humidity)
+    wx_df = pd.DataFrame(weather_data) if weather_data else pd.DataFrame(columns=['timestamp', 'temperature_c', 'humidity_percent'])
+    if not wx_df.empty:
+        wx_df['date'] = pd.to_datetime(wx_df['timestamp']).dt.normalize()
+        # Average daily weather
+        wx_df = wx_df.groupby('date')[['temperature_c', 'humidity_percent']].mean().reset_index()
+
+    # Extraction (Pumping)
+    ex_df = pd.DataFrame(extraction_data) if extraction_data else pd.DataFrame(columns=['timestamp', 'volume_liters'])
+    if not ex_df.empty:
+        ex_df['date'] = pd.to_datetime(ex_df['timestamp']).dt.normalize()
+        # Sum daily extraction
+        ex_df = ex_df.groupby('date')['volume_liters'].sum().reset_index()
+
+    # 2. Merge All Inputs (Master Table)
+    # Start with Target (Water Level) - We need the date backbone
+    df = gw_df[['date', 'region_id', 'avg_water_level']].sort_values('date')
+    
+    # Left join features (fill missing days with 0 for rain/extraction)
+    df = pd.merge(df, rf_df, on='date', how='left').fillna({'amount_mm': 0})
+    df = pd.merge(df, wx_df, on='date', how='left') 
+    df = pd.merge(df, ex_df, on='date', how='left').fillna({'volume_liters': 0})
+    
+    # Forward fill weather data (temp doesn't change wildly overnight if missing)
+    # But only if we have at least some data
+    if 'temperature_c' in df.columns:
+        df[['temperature_c', 'humidity_percent']] = df[['temperature_c', 'humidity_percent']].ffill().bfill()
+    else:
+        df['temperature_c'] = 25.0 # Default fallback
+        df['humidity_percent'] = 50.0
+
+    # 3. Apply Physics Calculations (Vectorized)
+    
+    # A. Calculate Evapotranspiration (ET)
+    df['evap_loss_mm'] = df.apply(
+        lambda row: calculate_evapotranspiration(row.get('temperature_c'), row.get('humidity_percent')), axis=1
     )
-
-    # 3. Apply Feature Engineering per Region
-    # We use groupby().apply() to ensure lags don't cross region boundaries
-    def apply_transformations(group):
-        # Sort by date asc to ensure correct rolling/shifting
-        group = group.sort_values('date')
-        
-        # --- Target ---
-        # The value we want to predict for this Date
-        group['target_water_level'] = group['avg_water_level']
-
-        # --- Rainfall Lags (No Target Leakage) ---
-        # feat_rainfall_1d_lag: Rain yesterday (T-1)
-        group['feat_rainfall_1d_lag'] = group['total_rainfall_mm'].shift(1)
-        
-        # feat_rainfall_3d_sum: Sum of rain from T-3 to T-1
-        # Shift(1) first ensures we only look at yesterday backwards
-        group['feat_rainfall_3d_sum'] = group['total_rainfall_mm'].shift(1).rolling(window=3).sum()
-        
-        # feat_rainfall_7d_sum: Sum of rain from T-7 to T-1
-        group['feat_rainfall_7d_sum'] = group['total_rainfall_mm'].shift(1).rolling(window=7).sum()
-
-        # --- Water Level Trend (No Target Leakage) ---
-        # feat_water_trend_7d: Difference between T-1 and T-8
-        # This represents the trend leading UP TO the prediction day, without seeing the prediction day.
-        # Safe for ML.
-        prev_day = group['avg_water_level'].shift(1)
-        prev_week = group['avg_water_level'].shift(8)
-        group['feat_water_trend_7d'] = prev_day - prev_week
-
-        # --- Seasonality ---
-        # Extract Day of Year (1-366)
-        day_of_year = group['date'].dt.dayofyear
-        group['day_of_year'] = day_of_year
-        
-        # Cyclical Encoding (Sin/Cos)
-        # 365.25 accounts for leap years roughly, but 365.0 is standard for simple robust features
-        group['feat_sin_day'] = np.sin(2 * np.pi * day_of_year / 365.0)
-        group['feat_cos_day'] = np.cos(2 * np.pi * day_of_year / 365.0)
-
-        return group
-
-    # Apply logic group-wise
-    features_df = merged_df.groupby('region_id', include_groups=False).apply(apply_transformations)
-    features_df = features_df.reset_index()
     
-    # 4. Enforce Metadata Features (Denormalization)
-    # Map critical levels. If missing, use a safe default or drop (here we drop to be safe)
-    # In production, you might load this from a DB lookup.
-    features_df['static_critical_level'] = features_df['region_id'].map(static_critical_levels)
+    # B. Effective Rainfall (Net Recharge Input)
+    # Water that actually enters the soil
+    df['effective_rainfall'] = (df['amount_mm'] - df['evap_loss_mm']).clip(lower=0)
     
-    # 5. Clean Up
-    # Drop rows with NaN (caused by shifting/rolling at the start of history)
-    # Drop rows where critical_level mapping failed
-    features_df = features_df.dropna()
+    # C. Normalize Extraction
+    # Log-transform volume to stabilize variance: log(1 + Liters)
+    # In a real system, we would divide by Area to get mm, but log is a good proxy for ML.
+    df['log_extraction'] = np.log1p(df['volume_liters'])
+    
+    # D. Net Flux Proxy
+    # Positive = Recharge, Negative = Discharge
+    # We subtract a scaled version of extraction (heuristic coefficient 0.1 for scaling)
+    df['net_flux_proxy'] = df['effective_rainfall'] - (df['log_extraction'] * 0.1)
 
-    # 6. Formatting Output
+    # 4. Feature Engineering (Lags & Rolling)
+    
+    # Dynamic Window based on Soil Type
+    soil_type = region_metadata.get('soil_type', 'sandy_loam')
+    permeability = region_metadata.get('permeability_index', 0.5)
+    
+    # Clay holds water longer -> Long memory (30 days)
+    # Sand drains fast -> Short memory (7 days)
+    if soil_type == 'clay':
+        window = 30 
+    elif soil_type == 'rock':
+        window = 60
+    else:
+        window = 7  # Sandy/Loam default
+        
+    df = df.sort_values('date')
+    
+    # Target to Predict
+    df['target_water_level'] = df['avg_water_level']
+    
+    # History Features (Shift 1 to avoid leakage - we predict Today using Yesterday's data)
+    df['feat_net_flux_1d_lag'] = df['net_flux_proxy'].shift(1)
+    df['feat_net_flux_window_sum'] = df['net_flux_proxy'].shift(1).rolling(window=window).sum()
+    
+    # Trend
+    df['feat_water_trend_7d'] = df['avg_water_level'].shift(1) - df['avg_water_level'].shift(8)
+    
+    # Static Metadata Features (For Model Context)
+    df['feat_soil_permeability'] = permeability
+    
+    # Seasonality
+    day_of_year = df['date'].dt.dayofyear
+    df['feat_sin_day'] = np.sin(2 * np.pi * day_of_year / 365.0)
+    df['feat_cos_day'] = np.cos(2 * np.pi * day_of_year / 365.0)
+
+    # 5. Clean & Format
+    df = df.dropna()
+    
     output_cols = [
         'date', 'region_id', 'target_water_level',
-        'feat_rainfall_1d_lag', 'feat_rainfall_3d_sum', 'feat_rainfall_7d_sum',
-        'feat_water_trend_7d', 'static_critical_level',
-        'day_of_year', 'feat_sin_day', 'feat_cos_day'
+        'feat_net_flux_1d_lag', 'feat_net_flux_window_sum',
+        'feat_water_trend_7d', 'feat_soil_permeability',
+        'feat_sin_day', 'feat_cos_day'
     ]
     
-    # Ensure types match Pydantic models (float rounding)
-    float_cols = [
-        'target_water_level', 'feat_rainfall_1d_lag', 'feat_rainfall_3d_sum', 
-        'feat_rainfall_7d_sum', 'feat_water_trend_7d', 'feat_sin_day', 'feat_cos_day'
-    ]
-    features_df[float_cols] = features_df[float_cols].round(4)
+    # Round floats
+    float_cols = [c for c in output_cols if c not in ['date', 'region_id']]
+    df[float_cols] = df[float_cols].round(4)
     
-    return features_df[output_cols].to_dict('records')
+    return df[output_cols].to_dict('records')

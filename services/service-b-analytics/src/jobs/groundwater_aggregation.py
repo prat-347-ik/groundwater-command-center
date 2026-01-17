@@ -1,9 +1,15 @@
 import logging
 from datetime import datetime, timedelta, timezone
 import sys
+import pandas as pd
 from pymongo import UpdateOne
 from src.config.mongo_client import mongo_client
 from src.schemas.olap_models import DailyRegionGroundwater
+
+# 🆕 Phase 3 Imports
+from src.extract.service_a_adapter import ServiceAAdapter
+from src.extract.service_c_adapter import ServiceCAdapter
+from src.transform.feature_engineering import generate_region_features
 
 # Configure Logger
 logger = logging.getLogger(__name__)
@@ -14,16 +20,23 @@ def get_region_metadata(db):
     Performs an Application-Side Join (adhering to 'No DB Joins' constraint).
     
     Returns:
-        dict: {region_id: {name: str, state: str}}
+        dict: {region_id: {name: str, state: str, soil_type: str, permeability: float}}
     """
     regions = {}
     # Read-Only access to Service A 'regions' collection
-    cursor = db.regions.find({}, {"region_id": 1, "name": 1, "state": 1, "_id": 0})
+    # 🆕 Phase 3: Fetch Soil/Hydro Context
+    projection = {
+        "region_id": 1, "name": 1, "state": 1, 
+        "soil_type": 1, "permeability_index": 1, "_id": 0
+    }
+    cursor = db.regions.find({}, projection)
     
     for r in cursor:
         regions[r["region_id"]] = {
             "name": r["name"],
-            "state": r["state"]
+            "state": r["state"],
+            "soil_type": r.get("soil_type", "sandy_loam"), # Default if missing
+            "permeability_index": r.get("permeability_index", 0.5)
         }
     return regions
 
@@ -42,6 +55,63 @@ def get_total_well_counts(db):
     ]
     results = db.wells.aggregate(pipeline)
     return {r["_id"]: r["count"] for r in results}
+
+def update_feature_store(region_id: str, region_meta: dict, olap_db):
+    """
+    🆕 Phase 3: Fetches all multi-source data and updates the Feature Store.
+    This runs AFTER the daily aggregation to ensure the latest target is available.
+    """
+    try:
+        # 1. Initialize Adapters
+        # We use API adapters for external services, but can direct fetch from OLAP for local data
+        adapter_a = ServiceAAdapter() 
+        adapter_c = ServiceCAdapter()
+
+        # 2. Fetch Historical Data needed for Features
+        # A. Groundwater (Target) - Fetch last 90 days from OLAP
+        gw_cursor = olap_db.daily_region_groundwater.find(
+            {"region_id": region_id},
+            {"date": 1, "avg_water_level": 1, "region_id": 1, "_id": 0}
+        ).sort("date", 1).limit(90)
+        gw_data = list(gw_cursor)
+        
+        # B. Rainfall (Service C)
+        rain_data = list(adapter_c.fetch_rainfall_data(region_id)) # Note: method name in adapter might vary, assuming logic
+        # If using async in adapter, we might need a sync wrapper, or use requests directly here for simplicity
+        # (Assuming the Adapter has a sync fallback or we use the API directly)
+        
+        # C. Weather (Service C) - 🆕 Phase 3
+        weather_data = adapter_c.fetch_weather_history(region_id)
+        
+        # D. Extraction (Service A) - 🆕 Phase 3
+        extraction_data = adapter_a.fetch_extraction_history(region_id)
+        
+        # 3. Generate Features (Physics-Informed)
+        features = generate_region_features(
+            groundwater_data=gw_data,
+            rainfall_data=rain_data, # Pass empty list if fetch fails, handler inside handles it
+            weather_data=weather_data,
+            extraction_data=extraction_data,
+            region_metadata=region_meta
+        )
+        
+        # 4. Save to Feature Store (Upsert)
+        if features:
+            ops = []
+            for feat in features:
+                ops.append(
+                    UpdateOne(
+                        {"region_id": feat["region_id"], "date": feat["date"]},
+                        {"$set": feat},
+                        upsert=True
+                    )
+                )
+            if ops:
+                olap_db.region_feature_store.bulk_write(ops)
+                # logger.info(f"   ✨ Features updated for {region_id}")
+
+    except Exception as e:
+        logger.error(f"Feature Gen Failed for {region_id}: {e}")
 
 def run_groundwater_aggregation(target_date_str: str):
     """
@@ -112,6 +182,7 @@ def run_groundwater_aggregation(target_date_str: str):
 
     # 6. Transform & Validate (Python Layer)
     bulk_ops = []
+    active_regions = []
     
     for row in raw_results:
         region_id = row["region_id"]
@@ -151,6 +222,8 @@ def run_groundwater_aggregation(target_date_str: str):
                     upsert=True
                 )
             )
+            active_regions.append(region_id)
+            
         except Exception as e:
             logger.error(f"Schema Validation Error for Region {region_id}: {e}")
 
@@ -158,6 +231,14 @@ def run_groundwater_aggregation(target_date_str: str):
     if bulk_ops:
         result = olap_db.daily_region_groundwater.bulk_write(bulk_ops)
         logger.info(f"✅ Write Complete: {result.upserted_count} inserted, {result.modified_count} updated.")
+        
+        # 🆕 Phase 3: Trigger Feature Generation for Affected Regions
+        logger.info("⚙️ Starting Phase 3 Feature Generation...")
+        for rid in active_regions:
+            # We pass the metadata dictionary for that region (includes soil info)
+            update_feature_store(rid, region_meta[rid], olap_db)
+        logger.info("✅ Feature Generation Complete.")
+        
     else:
         logger.info("No data to process for this date.")
 

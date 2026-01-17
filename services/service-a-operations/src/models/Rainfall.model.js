@@ -1,30 +1,58 @@
 import mongoose from 'mongoose';
+import { randomUUID } from 'crypto';
 
-const RainfallSchema = new mongoose.Schema({
+const RegionSchema = new mongoose.Schema({
   region_id: {
-    type: String, // Reference to Region UUID (No embedding, just the ID)
+    type: String,
+    default: () => randomUUID(),
+    unique: true,
     required: true,
-    index: true // Simple index for basic filtering
+    index: true
   },
-  timestamp: { 
-    type: Date, 
-    default: Date.now,
+  name: { 
+    type: String, 
+    required: true,
+    trim: true
+  },
+  state: { 
+    type: String, 
     required: true 
   },
-  amount_mm: { 
-    type: Number, // Rainfall in millimeters
+  critical_level: { 
+    type: Number, 
     required: true,
     min: 0
   },
-  source: {
-    type: String,
-    enum: ['sensor', 'manual', 'weather_station', 'third_party_api'],
-    default: 'sensor'
+  // --- 🆕 Phase 1: Hydro-Geological Context ---
+  soil_type: { 
+    type: String, 
+    enum: ['clay', 'sandy_loam', 'silt', 'rock'],
+    default: 'sandy_loam',
+    required: true
+  },
+  aquifer_depth: { 
+    type: Number, 
+    min: 0,
+    default: 50, // Default depth in meters if unknown
+    required: true
+  },
+  permeability_index: { 
+    type: Number, 
+    min: 0, 
+    max: 1, 
+    default: 0.5, // 0 = Impermeable, 1 = Highly Permeable
+    required: true
+  },
+  // ---------------------------------------------
+  is_active: {
+    type: Boolean,
+    default: true,
+    index: true
+  },
+  created_at: { 
+    type: Date, 
+    default: Date.now 
   }
 });
 
-// 📌 RULE: Compound Index for efficient time-range queries per region
-// Example Query: "Get total rainfall for Region X in the last 7 days"
-RainfallSchema.index({ region_id: 1, timestamp: -1 });
-
-export default mongoose.model('Rainfall', RainfallSchema);
+export default mongoose.model('Region', RegionSchema);
