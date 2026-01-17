@@ -2,7 +2,8 @@ import httpx
 import pandas as pd
 import logging
 import os
-from typing import Optional
+from typing import Optional, List, Dict, Any
+import requests
 
 # Configuration
 SERVICE_C_URL = os.getenv("SERVICE_C_URL", "http://localhost:8100/api/v1")
@@ -52,3 +53,18 @@ class ServiceCAdapter:
             logger.error(f"❌ Failed to fetch rainfall: {e}")
             # Return empty DF so pipeline doesn't crash, but logs error
             return pd.DataFrame(columns=["date", "rainfall_mm"])
+        
+    # 🆕 Phase 3: Fetch Weather Data
+    def fetch_weather_history(self, region_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetches Temperature & Humidity logs (Evaporation inputs).
+        """
+        try:
+            url = f"{SERVICE_C_URL}/weather"
+            params = {"region_id": region_id, "limit": 1000}
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            return response.json().get('data', [])
+        except Exception as e:
+            logger.warning(f"Failed to fetch weather from Service C: {e}")
+            return []

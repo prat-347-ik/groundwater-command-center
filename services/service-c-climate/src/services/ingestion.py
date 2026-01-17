@@ -1,10 +1,13 @@
 import csv
 import os
 import logging
-from datetime import datetime
+from datetime import datetime,timezone
 from typing import Dict, Any
 
+import requests
+
 from config.database import db
+from models.weather import WeatherRecord
 
 # Configure Logger
 logger = logging.getLogger("service-c-ingestion")
@@ -15,6 +18,16 @@ class IngestionService:
 
     @staticmethod
     def process_csv_background(file_path: str):
+        """Legacy wrapper for rainfall ingestion."""
+        return IngestionService._ingest_rainfall(file_path)
+
+    @staticmethod
+    def _ingest_rainfall(file_path: str):
+        """
+        Background Worker for Rainfall Data Ingestion from CSV.
+        Expects CSV with columns: region_id, rainfall_mm, timestamp
+        """
+        logger.info(f"🌧️ Starting Rainfall ingestion for {file_path}")
         """
         Background Worker:
         1. Streams CSV from disk line-by-line (low memory).
@@ -91,3 +104,96 @@ class IngestionService:
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"🗑️ Cleaned up temp file: {file_path}")
+        
+
+
+
+     # 🆕 Phase 2: Weather Data Ingestion
+    @staticmethod
+    def process_weather_csv_background(file_path: str):
+        """
+        Background Worker for Weather Data (Temp/Humidity).
+        """
+        logger.info(f"☀️ Starting Weather ingestion for {file_path}")
+        
+        collection = db.get_weather_collection()
+        batch = []
+        total_inserted = 0
+        errors = 0
+
+        try:
+            with open(file_path, mode='r', encoding='utf-8') as f:
+                csv_reader = csv.DictReader(f)
+
+                for row in csv_reader:
+                    try:
+                        # Validation
+                        if 'region_id' not in row or 'temp_c' not in row:
+                            continue
+
+                        # Parse
+                        ts = datetime.utcnow()
+                        if row.get('timestamp'):
+                            ts = datetime.fromisoformat(row['timestamp'].replace('Z', '+00:00'))
+
+                        record = WeatherRecord(
+                            region_id=row['region_id'].strip(),
+                            temperature_c=float(row['temp_c']),
+                            humidity_percent=float(row.get('humidity', 50.0)),
+                            solar_radiation=float(row.get('solar', 0.0)),
+                            timestamp=ts,
+                            source="csv_history"
+                        )
+                        
+                        batch.append(record.dict())
+
+                        if len(batch) >= IngestionService.BATCH_SIZE:
+                            collection.insert_many(batch)
+                            total_inserted += len(batch)
+                            batch = []
+
+                    except Exception as e:
+                        errors += 1
+
+                if batch:
+                    collection.insert_many(batch)
+                    total_inserted += len(batch)
+
+            logger.info(f"✅ Weather Ingestion: {total_inserted} inserted, {errors} skipped.")
+
+        except Exception as e:
+            logger.error(f"❌ Weather Ingestion Failure: {e}")
+        finally:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+    # 🆕 Phase 2: External API Fetcher (Skeleton)
+    @staticmethod
+    def fetch_external_weather(region_id: str, lat: float, lon: float):
+        """
+        Fetches live weather from an open API (e.g., OpenMeteo)
+        """
+        try:
+            # Example: Open-Meteo Free API
+            url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+            response = requests.get(url)
+            
+            if response.status_code == 200:
+                data = response.json()
+                current = data.get('current_weather', {})
+                
+                record = WeatherRecord(
+                    region_id=region_id,
+                    temperature_c=current.get('temperature'),
+                    humidity_percent=50.0, # API might need specific endpoint for humidity
+                    timestamp=datetime.now(timezone.utc),
+                    source="open_meteo_api"
+                )
+                
+                db.get_weather_collection().insert_one(record.dict())
+                logger.info(f"✅ Fetched live weather for {region_id}")
+            else:
+                logger.error(f"API Error: {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"Failed to fetch external weather: {e}")           
