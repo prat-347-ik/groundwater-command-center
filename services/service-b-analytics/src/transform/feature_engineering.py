@@ -26,25 +26,23 @@ def generate_region_features(
 ) -> List[Dict[str, Any]]:
     """
     Combines daily aggregations into a Physics-Informed ML feature set.
-    
-    Phase 3 Upgrades:
-    - Effective Rainfall = Rain - Evapotranspiration
-    - Net Flux = Effective Rainfall - Extraction
-    - Dynamic Lags based on Soil Permeability
     """
     if not groundwater_data:
         return []
 
     # 1. Convert to DataFrames & Standardize Dates
+    # 🛑 CRITICAL FIX: .dt.tz_localize(None) ensures all dates are Naive (No UTC mismatch)
+    
+    # Groundwater
     gw_df = pd.DataFrame(groundwater_data)
-    gw_df['date'] = pd.to_datetime(gw_df['date']).dt.normalize()
+    gw_df['date'] = pd.to_datetime(gw_df['date']).dt.tz_localize(None).dt.normalize()
     
     # Rainfall
     rf_df = pd.DataFrame(rainfall_data) if rainfall_data else pd.DataFrame(columns=['timestamp', 'amount_mm'])
-    if not rf_df.empty and 'date' not in rf_df.columns:
-        # Handle cases where source is 'timestamp' vs 'date'
+    if not rf_df.empty:
         col = 'timestamp' if 'timestamp' in rf_df.columns else 'date'
-        rf_df['date'] = pd.to_datetime(rf_df[col]).dt.normalize()
+        rf_df['date'] = pd.to_datetime(rf_df[col]).dt.tz_localize(None).dt.normalize()
+        
         # Aggregate hourly rain to daily
         if 'amount_mm' in rf_df.columns:
             rf_df = rf_df.groupby('date')['amount_mm'].sum().reset_index()
@@ -55,14 +53,14 @@ def generate_region_features(
     # Weather (Temp/Humidity)
     wx_df = pd.DataFrame(weather_data) if weather_data else pd.DataFrame(columns=['timestamp', 'temperature_c', 'humidity_percent'])
     if not wx_df.empty:
-        wx_df['date'] = pd.to_datetime(wx_df['timestamp']).dt.normalize()
+        wx_df['date'] = pd.to_datetime(wx_df['timestamp']).dt.tz_localize(None).dt.normalize()
         # Average daily weather
         wx_df = wx_df.groupby('date')[['temperature_c', 'humidity_percent']].mean().reset_index()
 
     # Extraction (Pumping)
     ex_df = pd.DataFrame(extraction_data) if extraction_data else pd.DataFrame(columns=['timestamp', 'volume_liters'])
     if not ex_df.empty:
-        ex_df['date'] = pd.to_datetime(ex_df['timestamp']).dt.normalize()
+        ex_df['date'] = pd.to_datetime(ex_df['timestamp']).dt.tz_localize(None).dt.normalize()
         # Sum daily extraction
         ex_df = ex_df.groupby('date')['volume_liters'].sum().reset_index()
 
@@ -76,65 +74,51 @@ def generate_region_features(
     df = pd.merge(df, ex_df, on='date', how='left').fillna({'volume_liters': 0})
     
     # Forward fill weather data (temp doesn't change wildly overnight if missing)
-    # But only if we have at least some data
     if 'temperature_c' in df.columns:
         df[['temperature_c', 'humidity_percent']] = df[['temperature_c', 'humidity_percent']].ffill().bfill()
     else:
-        df['temperature_c'] = 25.0 # Default fallback
+        df['temperature_c'] = 25.0 
         df['humidity_percent'] = 50.0
 
-    # 3. Apply Physics Calculations (Vectorized)
+    # 3. Apply Physics Calculations
     
-    # A. Calculate Evapotranspiration (ET)
+    # A. Evapotranspiration (ET)
     df['evap_loss_mm'] = df.apply(
         lambda row: calculate_evapotranspiration(row.get('temperature_c'), row.get('humidity_percent')), axis=1
     )
     
-    # B. Effective Rainfall (Net Recharge Input)
-    # Water that actually enters the soil
+    # B. Effective Rainfall
     df['effective_rainfall'] = (df['amount_mm'] - df['evap_loss_mm']).clip(lower=0)
     
-    # C. Normalize Extraction
-    # Log-transform volume to stabilize variance: log(1 + Liters)
-    # In a real system, we would divide by Area to get mm, but log is a good proxy for ML.
+    # C. Normalize Extraction (Log)
     df['log_extraction'] = np.log1p(df['volume_liters'])
     
     # D. Net Flux Proxy
-    # Positive = Recharge, Negative = Discharge
-    # We subtract a scaled version of extraction (heuristic coefficient 0.1 for scaling)
     df['net_flux_proxy'] = df['effective_rainfall'] - (df['log_extraction'] * 0.1)
 
     # 4. Feature Engineering (Lags & Rolling)
     
-    # Dynamic Window based on Soil Type
     soil_type = region_metadata.get('soil_type', 'sandy_loam')
     permeability = region_metadata.get('permeability_index', 0.5)
     
-    # Clay holds water longer -> Long memory (30 days)
-    # Sand drains fast -> Short memory (7 days)
     if soil_type == 'clay':
         window = 30 
     elif soil_type == 'rock':
         window = 60
     else:
-        window = 7  # Sandy/Loam default
+        window = 7  
         
     df = df.sort_values('date')
     
-    # Target to Predict
     df['target_water_level'] = df['avg_water_level']
     
-    # History Features (Shift 1 to avoid leakage - we predict Today using Yesterday's data)
+    # History Features (Shift 1 to avoid leakage)
     df['feat_net_flux_1d_lag'] = df['net_flux_proxy'].shift(1)
     df['feat_net_flux_window_sum'] = df['net_flux_proxy'].shift(1).rolling(window=window).sum()
-    
-    # Trend
     df['feat_water_trend_7d'] = df['avg_water_level'].shift(1) - df['avg_water_level'].shift(8)
     
-    # Static Metadata Features (For Model Context)
     df['feat_soil_permeability'] = permeability
     
-    # Seasonality
     day_of_year = df['date'].dt.dayofyear
     df['feat_sin_day'] = np.sin(2 * np.pi * day_of_year / 365.0)
     df['feat_cos_day'] = np.cos(2 * np.pi * day_of_year / 365.0)
@@ -149,7 +133,6 @@ def generate_region_features(
         'feat_sin_day', 'feat_cos_day'
     ]
     
-    # Round floats
     float_cols = [c for c in output_cols if c not in ['date', 'region_id']]
     df[float_cols] = df[float_cols].round(4)
     
