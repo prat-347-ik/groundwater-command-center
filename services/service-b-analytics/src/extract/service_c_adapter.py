@@ -13,10 +13,10 @@ class ServiceCAdapter:
     """
     
     def __init__(self):
-        # 1. FIX: Initialize base_url so 'self.base_url' works in methods below
+        # 1. FIX: Initialize base_url
         self.base_url = os.getenv("SERVICE_C_URL", "http://localhost:8100/api/v1")
 
-    # --- Legacy Async Method (Keep for existing async flows) ---
+    # --- Legacy Async Method ---
     async def get_rainfall_history(self, region_id: str, days: int = 365) -> pd.DataFrame:
         url = f"{self.base_url}/rainfall/"
         params = {"region_id": region_id, "limit": days}
@@ -37,41 +37,29 @@ class ServiceCAdapter:
 
     # --- 🆕 Synchronous Methods for Aggregation Job ---
 
-    # 2. FIX: Add the missing synchronous method called by groundwater_aggregation.py
+    # 2. FIX: Add the missing synchronous method
     def fetch_rainfall_data(self, region_id: str) -> List[Dict[str, Any]]:
-        """
-        Synchronous fetch for rainfall data (Amount).
-        """
         try:
             url = f"{self.base_url}/rainfall"
             params = {"region_id": region_id, "limit": 1000}
-            
-            # Use requests (Sync) instead of httpx (Async)
             response = requests.get(url, params=params, timeout=10)
             if response.status_code == 404:
                 return []
             response.raise_for_status()
-            
-            # Return raw list of dicts
             return response.json().get('data', [])
         except Exception as e:
             logger.warning(f"Failed to fetch rainfall from Service C: {e}")
             return []
 
-    # 3. FIX: Ensure this method uses self.base_url correctly
+    # 3. FIX: Ensure this uses self.base_url
     def fetch_weather_history(self, region_id: str) -> List[Dict[str, Any]]:
-        """
-        Fetches Temperature & Humidity logs (Evaporation inputs).
-        """
         try:
             url = f"{self.base_url}/weather"
             params = {"region_id": region_id, "limit": 1000}
-            
             response = requests.get(url, params=params, timeout=10)
             if response.status_code == 404:
                 return []
             response.raise_for_status()
-            
             return response.json().get('data', [])
         except Exception as e:
             logger.warning(f"Failed to fetch weather from Service C: {e}")
