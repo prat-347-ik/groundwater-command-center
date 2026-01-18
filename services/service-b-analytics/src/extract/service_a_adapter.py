@@ -44,7 +44,7 @@ class ServiceAAdapter:
             "source": 1
         }
         
-        return self.extractor.fetch_batch("water_readings", query, projection)
+        return self.extractor.fetch_batch("waterreadings", query, projection)
 
     def fetch_rainfall(self, start_date: datetime, end_date: datetime) -> Iterator[Dict[str, Any]]:
         """
