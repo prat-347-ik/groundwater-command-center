@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config.database import db
 from api.rainfall import router as rainfall_router
 from api.weather import router as weather_router # 🆕 Import
+from api.satellite import router as satellite_router  # <--- 🆕 Import
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,6 +17,8 @@ async def lifespan(app: FastAPI):
     db.get_rainfall_collection().create_index([("region_id", 1), ("timestamp", -1)])
     # 🆕 Weather Indexes
     db.get_weather_collection().create_index([("region_id", 1), ("timestamp", -1)])
+    # <--- 🆕 Satellite Indexes
+    db.get_satellite_collection().create_index([("region_id", 1), ("timestamp", -1)]) # <--- 🆕 Index
     yield
     db.close()
 
@@ -36,6 +39,7 @@ app.add_middleware(
 # Register Routes
 app.include_router(rainfall_router)
 app.include_router(weather_router) # 🆕 Register
+app.include_router(satellite_router)  # <--- 🆕 Register
 
 @app.get("/health")
 def health_check():
