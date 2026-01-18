@@ -25,6 +25,10 @@ class Database:
     def get_weather_collection(self):
         """Returns the specific collection for Weather data."""
         return self.db["weather"]
+    
+    def get_satellite_collection(self):
+        if self.db is None: self.connect()
+        return self.db.satellite_data
 
     def close(self):
         """Closes the connection."""
