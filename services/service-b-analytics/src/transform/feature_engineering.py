@@ -114,7 +114,7 @@ def generate_region_features(
     
     # History Features (Shift 1 to avoid leakage)
     df['feat_net_flux_1d_lag'] = df['net_flux_proxy'].shift(1)
-    df['feat_net_flux_window_sum'] = df['net_flux_proxy'].shift(1).rolling(window=window).sum()
+    df['feat_net_flux_window_sum'] = df['net_flux_proxy'].shift(1).rolling(window=window, min_periods=1).sum()
     df['feat_water_trend_7d'] = df['avg_water_level'].shift(1) - df['avg_water_level'].shift(8)
     
     df['feat_soil_permeability'] = permeability
@@ -126,8 +126,10 @@ def generate_region_features(
     # 5. Clean & Format
     df = df.dropna()
     
+    # 🔴 UPDATED: Include raw physics inputs needed for LSTM
     output_cols = [
         'date', 'region_id', 'target_water_level',
+        'effective_rainfall', 'log_extraction',  # <--- NEWLY ADDED
         'feat_net_flux_1d_lag', 'feat_net_flux_window_sum',
         'feat_water_trend_7d', 'feat_soil_permeability',
         'feat_sin_day', 'feat_cos_day'

@@ -1,6 +1,6 @@
 import os
 import json
-import pickle
+import torch
 import logging
 import pandas as pd
 import numpy as np
@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import List, Dict, Any
 
 from src.config.mongo_client import mongo_client
+from src.modelling.lstm_arch import GroundwaterLSTM  # Must match the architecture definition
 
 # Configure Logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -18,28 +19,25 @@ ARTIFACTS_DIR = "models/v1"
 REGISTRY_PATH = os.path.join(ARTIFACTS_DIR, "model_registry.json")
 FORECAST_COLLECTION = "daily_forecasts"
 FORECAST_HORIZON_DAYS = 7
+SEQUENCE_LENGTH = 30  # LSTM requires 30 days of history
 
-# Features expected by the model (Must match training!)
+# Features expected by the LSTM model (Order Matters!)
 FEATURES = [
-    'feat_rainfall_1d_lag', 
-    'feat_rainfall_7d_sum', 
-    'feat_water_trend_7d', 
+    'effective_rainfall', 
+    'log_extraction', 
+    'feat_net_flux_1d_lag', 
+    'feat_soil_permeability', 
     'feat_sin_day', 
     'feat_cos_day'
 ]
 
-def load_active_models() -> Dict[str, str]:
+def load_active_models() -> Dict[str, Any]:
     """
-    Loads the registry and maps region_id -> artifact_path strictly for ACTIVE models.
-    
-    Constraints:
-    - Must load from registry.json (Single Source of Truth)
-    - Must filter by status="active"
-    - Must fail fast if no models are available
+    Loads active PyTorch models from the registry.
+    Returns: Dict[region_id, loaded_model_object]
     """
     if not os.path.exists(REGISTRY_PATH):
-        # Fail Fast: If registry is missing, the system is in an invalid state.
-        raise FileNotFoundError(f"🚨 CRITICAL: Registry not found at {REGISTRY_PATH}. Cannot perform inference.")
+        raise FileNotFoundError(f"🚨 CRITICAL: Registry not found at {REGISTRY_PATH}.")
         
     try:
         with open(REGISTRY_PATH, 'r') as f:
@@ -47,67 +45,67 @@ def load_active_models() -> Dict[str, str]:
     except json.JSONDecodeError as e:
         raise ValueError(f"🚨 CRITICAL: Corrupted registry file. {e}")
 
-    # Filter: Select ONLY active models
-    # This prevents loading 'staged', 'archived', or 'rejected' models
-    active_models = [
-        entry for entry in registry 
-        if entry.get('status') == 'active'
-    ]
+    active_entries = [entry for entry in registry if entry.get('status') == 'active']
     
-    if not active_models:
-        # Fail Fast: Running inference with 0 models is likely a pipeline error
-        raise RuntimeError("🚨 CRITICAL: Registry exists but contains NO 'active' models. Aborting.")
-
-    # Create optimized lookup map
-    model_map = {entry['region_id']: entry['artifact_path'] for entry in active_models}
-    
-    logging.info(f"✅ Loaded {len(model_map)} active models from registry.")
-    return model_map
-
-def load_model_registry() -> Dict[str, str]:
-    """
-    Loads the registry and maps region_id -> artifact_path.
-    """
-    if not os.path.exists(REGISTRY_PATH):
-        logger.error("❌ Model registry not found. Cannot perform inference.")
+    if not active_entries:
+        logger.warning("⚠️ No active models found in registry.")
         return {}
-        
-    with open(REGISTRY_PATH, 'r') as f:
-        registry = json.load(f)
-        
-    # Create a map for quick lookup: region_id -> full_artifact_path
-    return {entry['region_id']: entry['artifact_path'] for entry in registry}
 
-def get_latest_features(region_ids: List[str]) -> pd.DataFrame:
+    loaded_models = {}
+    for entry in active_entries:
+        region_id = entry['region_id']
+        path = entry['artifact_path']
+        
+        if not os.path.exists(path):
+            logger.error(f"❌ Artifact missing for {region_id}: {path}")
+            continue
+            
+        try:
+            # Initialize Architecture
+            model = GroundwaterLSTM(input_dim=len(FEATURES), hidden_dim=50)
+            # Load Weights
+            model.load_state_dict(torch.load(path))
+            model.eval() # Set to inference mode
+            loaded_models[region_id] = model
+        except Exception as e:
+            logger.error(f"❌ Failed to load PyTorch model for {region_id}: {e}")
+
+    logger.info(f"✅ Loaded {len(loaded_models)} active LSTM models.")
+    return loaded_models
+
+def get_recent_history(region_ids: List[str]) -> pd.DataFrame:
     """
-    Fetches the most recent feature row for each requested region.
+    Fetches the last 30 days of features for each active region.
+    Returns a DataFrame containing history for all requested regions.
     """
     db = mongo_client.get_olap_db()
     
-    # We use an aggregation to get the 'max' date document per region
-    pipeline = [
-        {"$match": {"region_id": {"$in": region_ids}}},
-        {"$sort": {"date": -1}},
-        {"$group": {
-            "_id": "$region_id",
-            "latest_doc": {"$first": "$$ROOT"}
-        }},
-        {"$replaceRoot": {"newRoot": "$latest_doc"}}
-    ]
+    # Aggregation to get last N docs per group is complex, so we iterate for simplicity
+    # (In high-scale, use $window or $sort+$group+$slice)
+    all_data = []
     
-    docs = list(db.region_feature_store.aggregate(pipeline))
-    
-    if not docs:
+    for rid in region_ids:
+        cursor = db.region_feature_store.find(
+            {"region_id": rid}
+        ).sort("date", -1).limit(SEQUENCE_LENGTH)
+        
+        docs = list(cursor)
+        if len(docs) < SEQUENCE_LENGTH:
+            logger.warning(f"⚠️ Insufficient history for {rid} (Found {len(docs)}, Need {SEQUENCE_LENGTH}). Skipping.")
+            continue
+            
+        # Sort back to ascending time for the LSTM (Oldest -> Newest)
+        docs.reverse() 
+        all_data.extend(docs)
+        
+    if not all_data:
         return pd.DataFrame()
         
-    df = pd.DataFrame(docs)
+    df = pd.DataFrame(all_data)
     df['date'] = pd.to_datetime(df['date'])
     return df
 
 def generate_seasonality_features(date: pd.Timestamp) -> Dict[str, float]:
-    """
-    Calculates deterministic seasonality features for a given date.
-    """
     day_of_year = date.dayofyear
     return {
         "feat_sin_day": np.sin(2 * np.pi * day_of_year / 365.0),
@@ -116,128 +114,96 @@ def generate_seasonality_features(date: pd.Timestamp) -> Dict[str, float]:
 
 def run_inference():
     """
-    Main Forecasting Routine.
-    1. Load Models
-    2. Fetch Latest State
-    3. Generate 7-Day Forecast (Recursive)
-    4. Save to OLAP (Idempotent: One forecast per region per day)
+    Main LSTM Forecasting Routine.
     """
     try:
-            # 1. Load Model Map
-            model_map = load_model_registry()
-            if not model_map:
-                return
+        # 1. Load Models
+        models = load_active_models()
+        if not models:
+            return
 
-            # 2. Fetch Latest Features
-            active_regions = list(model_map.keys())
-            latest_df = get_latest_features(active_regions)
+        # 2. Fetch History (30 Days)
+        history_df = get_recent_history(list(models.keys()))
+        if history_df.empty:
+            return
+
+        forecasts = []
+        logger.info(f"🔮 Generating {FORECAST_HORIZON_DAYS}-day LSTM forecasts...")
+
+        # Group by region to process sequences
+        for region_id, region_df in history_df.groupby('region_id'):
+            model = models.get(region_id)
+            if not model: continue
+
+            # Prepare Input Tensor (1, 30, 6)
+            # Fill NaNs with 0 to prevent crash
+            input_data = region_df[FEATURES].fillna(0).values
             
-            if latest_df.empty:
-                logger.warning("⚠️ No feature data found. Skipping inference.")
-                return
+            # Start Recursive Forecasting
+            current_seq = torch.tensor(input_data, dtype=torch.float32).unsqueeze(0) # Add batch dim
+            last_date = region_df['date'].max()
+            
+            # We need static features (like permeability) to carry forward
+            permeability = region_df['feat_soil_permeability'].iloc[-1]
 
-            forecasts = []
-            logger.info(f"🔮 Generating {FORECAST_HORIZON_DAYS}-day forecasts for {len(latest_df)} regions...")
-
-            for _, row in latest_df.iterrows():
-                region_id = row['region_id']
-                artifact_path = model_map.get(region_id)
+            for i in range(1, FORECAST_HORIZON_DAYS + 1):
+                # Predict next step
+                with torch.no_grad():
+                    pred_tensor = model(current_seq) # Output shape (1, 1)
+                    prediction = pred_tensor.item()
                 
-                if not artifact_path or not os.path.exists(artifact_path):
-                    continue
-                    
-                with open(artifact_path, 'rb') as f:
-                    model = pickle.load(f)
-
-                current_date = row['date']
-                current_trend = row['feat_water_trend_7d']
-                future_rain_1d = 0.0
-                future_rain_7d = 0.0 
-
-                for i in range(1, FORECAST_HORIZON_DAYS + 1):
-                    raw_date = current_date + timedelta(days=i)
-                    # Normalize to Midnight UTC
-                    forecast_date = raw_date.normalize().to_pydatetime()
-                    
-                    seasonality = generate_seasonality_features(raw_date)
-                    
-                    if i == 1:
-                        input_vector = np.array([[
-                            row['feat_rainfall_1d_lag'],
-                            row['feat_rainfall_7d_sum'],
-                            row['feat_water_trend_7d'],
-                            seasonality['feat_sin_day'],
-                            seasonality['feat_cos_day']
-                        ]])
-                    else:
-                        input_vector = np.array([[
-                            future_rain_1d,    
-                            future_rain_7d,    
-                            current_trend,     
-                            seasonality['feat_sin_day'],
-                            seasonality['feat_cos_day']
-                        ]])
-                    
-                    input_df = pd.DataFrame(input_vector, columns=FEATURES)
-                    prediction = model.predict(input_df)[0]
-                    
-                    forecasts.append({
-                        "region_id": region_id,
-                        "forecast_date": forecast_date,
-                        "predicted_level": float(round(prediction, 4)), # Ensure float for BSON
-                        "model_version": "v1.0-linear-baseline",
-                        "created_at": pd.Timestamp.utcnow().to_pydatetime(), # Ensure python datetime
-                        "horizon_step": int(i) # Ensure int
-                    })
-
-            # 4. Save to OLAP with VERIFICATION
-            if forecasts:
-                db = mongo_client.get_olap_db()
-                collection = db[FORECAST_COLLECTION]
+                # Create Next Input Row (Recursive Step)
+                next_date = last_date + timedelta(days=i)
+                seasonality = generate_seasonality_features(next_date)
                 
-                # --- DEBUG LOGGING ---
-                logger.info(f"💾 TARGET DB: '{db.name}'")
-                logger.info(f"💾 TARGET COLLECTION: '{collection.name}'")
-                logger.info(f"📄 Payload Sample (1st Item): {forecasts[0]}")
-                # ---------------------
+                # Assumption: Future Rain/Extraction = 0 (Conservative)
+                # Net Flux Lag: In a real system, we'd calculate this from the predicted level.
+                # For now, we assume neutral flux for future steps to stabilize prediction.
+                next_row = np.array([[
+                    0.0, # effective_rainfall
+                    0.0, # log_extraction
+                    0.0, # feat_net_flux_1d_lag (Neutral)
+                    permeability,
+                    seasonality['feat_sin_day'],
+                    seasonality['feat_cos_day']
+                ]])
                 
-                # IDEMPOTENCY FIX
-                region_ids = list(set(f['region_id'] for f in forecasts))
-                forecast_dates = list(set(f['forecast_date'] for f in forecasts))
+                # Update Sequence: Drop oldest, add new prediction context
+                # Note: We append the 'next_row' features, NOT the predicted water level directly.
+                # The LSTM predicts water level, but takes features as input.
+                next_tensor = torch.tensor(next_row, dtype=torch.float32).unsqueeze(0)
+                current_seq = torch.cat((current_seq[:, 1:, :], next_tensor), dim=1)
                 
-                logger.info(f"🧹 Clearing overlapping forecasts...")
-                delete_result = collection.delete_many({
-                    "region_id": {"$in": region_ids},
-                    "forecast_date": {"$in": forecast_dates}
+                # Append to results
+                forecasts.append({
+                    "region_id": region_id,
+                    "forecast_date": next_date.normalize().to_pydatetime(),
+                    "predicted_level": float(round(prediction, 4)),
+                    "model_version": "v2.0-lstm-pytorch",
+                    "created_at": pd.Timestamp.utcnow().to_pydatetime(),
+                    "horizon_step": i
                 })
-                logger.info(f"   - Removed {delete_result.deleted_count} stale records.")
 
-                # INSERT
-                result = collection.insert_many(forecasts)
-                logger.info(f"✅ Saved {len(result.inserted_ids)} forecast records.")
-                
-                # --- IMMEDIATE VERIFICATION READ ---
-                logger.info("🕵️ VERIFYING WRITE...")
-                # Query back exactly what we just wrote
-                verify_count = collection.count_documents({
-                    "region_id": {"$in": region_ids}
-                })
-                logger.info(f"📊 Database now contains {verify_count} records for regions {region_ids}")
-                
-                if verify_count == 0:
-                    logger.error("🚨 CRITICAL: Insert reported success, but immediate Read returned 0 records!")
-                # -----------------------------------
-                
-            else:
-                logger.info("No forecasts generated.")
-
+        # 4. Save to OLAP
+        if forecasts:
+            db = mongo_client.get_olap_db()
+            collection = db[FORECAST_COLLECTION]
+            
+            # Idempotency: Clean old forecasts for these dates
+            region_ids = list(set(f['region_id'] for f in forecasts))
+            dates = list(set(f['forecast_date'] for f in forecasts))
+            
+            collection.delete_many({
+                "region_id": {"$in": region_ids},
+                "forecast_date": {"$in": dates}
+            })
+            
+            result = collection.insert_many(forecasts)
+            logger.info(f"✅ Saved {len(result.inserted_ids)} LSTM forecast records.")
+            
     except Exception as e:
-            logger.exception(f"❌ Inference Failed: {e}")
-            raise e
+        logger.exception(f"❌ Inference Failed: {e}")
+        raise e
 
-
-# ✅ FIX: REMOVED THE 'finally: mongo_client.close()' BLOCK
-    # The connection must remain open.
 if __name__ == "__main__":
-    # This block is REQUIRED for the orchestrator to trigger the function
     run_inference()

@@ -3,6 +3,8 @@
 # 1. IGNORE Heavy Binary Artifacts
 # We only want to store the code and the registry, not the 500MB model files.
 models/v1/artifacts/*.pkl
+models/v1/*.pth
+*.pth
 
 # 2. IGNORE Transient/Temp Run Files
 # These are overwritten every run and don't need history.
@@ -18,7 +20,6 @@ models/v1/latest_run_manifest.json
 # 4. IGNORE Archive (Optional)
 # If you don't want to track retired models in Git history to save space.
 models/v1/archive/
-
 
 # 5. IGNORE pytest cache files
 .pytest_cache/
