@@ -1,13 +1,27 @@
 import sys
 from datetime import datetime
+from fastapi import FastAPI
 from src.utils.logger import setup_logger
 from src.jobs.daily_summary import run_daily_pipeline
+from src.api.forecasts import router as forecast_router
 
 logger = setup_logger()
 
+# --- 1. API CONFIGURATION (Accessed by Uvicorn) ---
+app = FastAPI(title="Groundwater Analytics Engine", version="2.0")
+
+# Register the Forecasts Router (Connects the Brain to the API)
+app.include_router(forecast_router)
+
+@app.get("/health")
+def health_check():
+    """Health check for the Analytics Service"""
+    return {"status": "active", "service": "Service B (Analytics)", "model_type": "LSTM/RF"}
+
+# --- 2. CLI JOB RUNNER (Accessed by Python command) ---
 def main():
     """
-    Main Entry Point.
+    Main Entry Point for Background Jobs.
     Usage: python main.py [job_name] [optional: YYYY-MM-DD]
     """
     if len(sys.argv) < 2:
@@ -26,7 +40,7 @@ def main():
 
     try:
         if job_name == "daily_summary":
-            # FIXED: Passing the required argument
+            # Running the Pipeline
             run_daily_pipeline(target_date_str)
         else:
             logger.warning(f"Job {job_name} not recognized.")
