@@ -23,8 +23,16 @@
         "region_id": "65f4fc28-a5f9-47e0-b326-962b20bb35b1",
         "model_type": "lstm-pytorch",
         "version": "2.0",
-        "status": "active",
+        "status": "archived",
         "artifact_path": "models/v1\\lstm_65f4fc28-a5f9-47e0-b326-962b20bb35b1.pth",
         "registered_at": "2026-01-19T15:47:50.169216+00:00"
+    },
+    {
+        "region_id": "65f4fc28-a5f9-47e0-b326-962b20bb35b1",
+        "model_type": "random-forest-sklearn",
+        "version": "1.0-rf",
+        "status": "active",
+        "artifact_path": "models/v1\\rf_65f4fc28-a5f9-47e0-b326-962b20bb35b1.pkl",
+        "registered_at": "2026-01-19T16:15:20.870691+00:00"
     }
 ]
