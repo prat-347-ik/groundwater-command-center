@@ -11,16 +11,27 @@ __pypackages__/
 
 # --- Service B: Model Versioning & Artifacts ---
 
-# 1. EXCLUDE Heavy Binary Artifacts (Local/S3 storage only)
-services/service-b-analytics/models/v1/artifacts/*.pkl
-services/service-b-analytics/models/v1/archive/
+# 1. IGNORE Heavy Binary Artifacts
+# We only want to store the code and the registry, not the 500MB model files.
+models/v1/artifacts/*.pkl
+models/v1/*.pth
+*.pth
 
-# 2. EXCLUDE Transient/Temp Run Files
-services/service-b-analytics/models/v1/evaluation_summary.json
-services/service-b-analytics/models/v1/latest_run_manifest.json
+# 2. IGNORE Transient/Temp Run Files
+# These are overwritten every run and don't need history.
+models/v1/evaluation_summary.json
+models/v1/latest_run_manifest.json
 
-# 3. FORCE INCLUDE Registry & Metadata (Registry-as-Code)
-# These define the state of production and must be versioned.
-!services/service-b-analytics/models/v1/model_registry.json
-!services/service-b-analytics/models/v1/metadata/*.json
-!services/service-b-analytics/models/v1/explainability_report.md
+# 3. FORCE INCLUDE Registry & Metadata (The "Registry-as-Code" Pattern)
+# We use '!' to ensure these are tracked even if a parent folder is ignored.
+!models/v1/model_registry.json
+!models/v1/metadata/*.json
+!models/v1/explainability_report.md
+
+# 4. IGNORE Archive (Optional)
+# If you don't want to track retired models in Git history to save space.
+models/v1/archive/
+
+# 5. IGNORE pytest cache files
+.pytest_cache/
+scripts/*/__pycache__/
