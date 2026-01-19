@@ -6,7 +6,7 @@ const WaterReadingSchema = new mongoose.Schema({
     required: true
   },
   region_id: {
-    type: String, // Reference to Region UUID (Denormalized for query speed)
+    type: String, // Reference to Region UUID
     required: true
   },
   timestamp: { 
@@ -22,11 +22,22 @@ const WaterReadingSchema = new mongoose.Schema({
     type: String,
     enum: ['sensor', 'manual', 'satellite'],
     required: true
+  },
+  // 🆕 ANOMALY DETECTION FIELDS
+  is_suspicious: {
+    type: Boolean,
+    default: false,
+    index: true // Index this so the ML pipeline can quickly filter "clean" data
+  },
+  anomaly_reason: {
+    type: String,
+    default: null
   }
 });
 
-// 📌 RULE: Compound Index for efficient time-range queries per region
-// Example Query: "Give me all readings for Region X in the last 30 days"
+
+
+// Compound Index for efficient time-range queries per region
 WaterReadingSchema.index({ region_id: 1, timestamp: -1 });
 
 export default mongoose.model('WaterReading', WaterReadingSchema);

@@ -5,10 +5,8 @@ import Well from '../../models/Well.model.js';
 import Region from '../../models/Region.model.js';
 
 // ==========================================
-// 1️⃣ Manual API (Single Insert)
+// 1️⃣ Manual API (Single Insert with Anomaly Check)
 // ==========================================
-// @desc    Ingest a single water reading
-// @route   POST /api/v1/water-readings
 export const createReading = async (req, res, next) => {
   try {
     const { well_id, region_id, water_level, source, timestamp } = req.body;
@@ -26,25 +24,44 @@ export const createReading = async (req, res, next) => {
       throw error;
     }
 
-    // 2. Integrity Check: Does the Region exist & is it active?
+    // 2. Integrity Checks (Region/Well existence)
     const region = await Region.findOne({ region_id });
-    if (!region) {
-      const error = new Error(`Region ${region_id} not found`);
-      error.status = 404;
-      throw error;
-    }
-    if (region.is_active === false) {
-      const error = new Error(`Region ${region.name} is inactive. Cannot ingest data.`);
+    if (!region || region.is_active === false) {
+      const error = new Error(`Region ${region_id} invalid or inactive.`);
       error.status = 409;
       throw error;
     }
 
-    // 3. Integrity Check: Does the Well exist in this Region?
     const well = await Well.findOne({ well_id, region_id });
     if (!well) {
       const error = new Error(`Well ${well_id} does not exist in Region ${region_id}`);
       error.status = 404;
       throw error;
+    }
+
+    // 3. 🛡️ ANOMALY DETECTION (Physics Firewall)
+    let is_suspicious = false;
+    let anomaly_reason = null;
+
+    // Fetch the most recent reading for this specific well
+    const lastReading = await WaterReading.findOne({ well_id })
+      .sort({ timestamp: -1 }); // Get latest
+
+    if (lastReading) {
+      const currentTs = timestamp ? new Date(timestamp) : new Date();
+      const lastTs = new Date(lastReading.timestamp);
+      
+      // Calculate Deltas
+      const timeDiffHours = (currentTs - lastTs) / (1000 * 60 * 60); // Convert ms to hours
+      const levelDiff = Math.abs(water_level - lastReading.water_level);
+
+      // 🚨 RULE: If level changes > 5m within 1 hour, it's physically impossible
+      if (timeDiffHours >= 0 && timeDiffHours <= 1.0 && levelDiff > 5.0) {
+        is_suspicious = true;
+        anomaly_reason = `Physics Violation: Changed ${levelDiff.toFixed(2)}m in ${timeDiffHours.toFixed(2)}h`;
+        
+        console.warn(`⚠️ Anomaly detected for Well ${well_id}: ${anomaly_reason}`);
+      }
     }
 
     // 4. Save
@@ -53,10 +70,17 @@ export const createReading = async (req, res, next) => {
       region_id,
       water_level,
       source,
-      timestamp: timestamp || new Date()
+      timestamp: timestamp || new Date(),
+      is_suspicious,     // <--- New Field
+      anomaly_reason     // <--- New Field
     });
 
-    res.status(201).json({ success: true, data: reading });
+    // Return 201 Created, but warn the user if it was flagged
+    res.status(201).json({ 
+      success: true, 
+      data: reading,
+      warning: is_suspicious ? "Data accepted but flagged as suspicious." : null
+    });
 
   } catch (error) {
     next(error);

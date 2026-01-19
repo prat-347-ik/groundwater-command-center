@@ -1,9 +1,9 @@
 import express from 'express';
-import { logExtraction, getExtractionHistory } from './extraction.controller.js';
+import { createLog, getExtractionHistory } from './extraction.controller.js';
 
 const router = express.Router();
 
-router.post('/', logExtraction);
+router.post('/', createLog);
 router.get('/:region_id', getExtractionHistory);
 
 export default router;
