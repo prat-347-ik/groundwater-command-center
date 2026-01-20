@@ -87,14 +87,14 @@ def generate_seasonality_features(date: pd.Timestamp) -> Dict[str, float]:
         "feat_cos_day": np.cos(2 * np.pi * day_of_year / 365.0)
     }
 
-def run_inference(region_id_filter: Optional[str] = None, planned_extraction_liters: Optional[float] = None) -> List[Dict[str, Any]]:
+def run_inference(region_id_filter: Optional[str] = None, planned_extraction_schedule: Optional[List[float]] = None) -> List[Dict[str, Any]]:
     """
     Main Forecasting Routine.
     
     Args:
         region_id_filter: If provided, only runs for this specific region.
-        planned_extraction_liters: If provided, runs a 'What-If' scenario using this daily extraction volume 
-                                   instead of the default 0.0. (Does NOT save to DB).
+        planned_extraction_schedule: List of 7 floats representing extraction (Liters) for Day 1 to Day 7.
+                                     If provided, runs a 'What-If' scenario. (Does NOT save to DB).
     """
     try:
         # 1. Load Models
@@ -116,7 +116,7 @@ def run_inference(region_id_filter: Optional[str] = None, planned_extraction_lit
             return []
 
         forecasts = []
-        mode_label = "SCENARIO" if planned_extraction_liters is not None else "BATCH"
+        mode_label = "SCENARIO" if planned_extraction_schedule is not None else "BATCH"
         logger.info(f"🌲 Generating {FORECAST_HORIZON_DAYS}-day RF forecasts ({mode_label} MODE)...")
 
         # 3. Inference Loop
@@ -134,10 +134,18 @@ def run_inference(region_id_filter: Optional[str] = None, planned_extraction_lit
                 # --- A. External Forcings ---
                 eff_rain = 0.0
                 
-                # Check for Scenario Input
-                if planned_extraction_liters is not None:
-                    # Apply user's planned extraction for the scenario
-                    log_ext = np.log1p(planned_extraction_liters)
+                # 🆕 HANDLE SCHEDULE LIST
+                current_planned_extraction = 0.0
+                if planned_extraction_schedule:
+                    # Map Horizon Step (1-7) to List Index (0-6)
+                    # If schedule is shorter than horizon, default to 0
+                    idx = i - 1
+                    if 0 <= idx < len(planned_extraction_schedule):
+                        current_planned_extraction = planned_extraction_schedule[idx]
+                
+                # Apply extraction logic
+                if mode_label == "SCENARIO":
+                    log_ext = np.log1p(current_planned_extraction)
                 else:
                     # Default assumption: Zero extraction for future
                     log_ext = 0.0
@@ -202,13 +210,13 @@ def run_inference(region_id_filter: Optional[str] = None, planned_extraction_lit
                     "model_version": "v3.0-rf-sklearn",
                     "created_at": pd.Timestamp.utcnow().to_pydatetime(),
                     "horizon_step": i,
-                    "scenario_extraction": planned_extraction_liters if planned_extraction_liters is not None else 0
+                    "scenario_extraction": current_planned_extraction if mode_label == "SCENARIO" else 0
                 })
 
         # 4. Handle Output
-        if planned_extraction_liters is not None:
+        if planned_extraction_schedule is not None:
             # SCENARIO MODE: Return results directly, DO NOT SAVE
-            logger.info(f"🧪 Generated scenario forecast for {region_id_filter} | Extraction: {planned_extraction_liters}L")
+            logger.info(f"🧪 Generated scenario forecast for {region_id_filter} | Schedule: {planned_extraction_schedule}")
             return forecasts
 
         # BATCH MODE: Save to DB

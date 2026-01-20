@@ -24,36 +24,34 @@ export const createLog = async (req, res, next) => {
       throw error;
     }
 
-    // --- 🛡️ SAFE YIELD ENFORCEMENT START ---
+   // --- 🛡️ SAFE YIELD ENFORCEMENT START ---
     
     // A. Ask Service B for the Forecast
-    // We want to know: "If nothing happens, where will the water be?"
     let predictedLevel = null;
     try {
-      // Get the 7-day forecast
       const response = await axios.get(`${SERVICE_B_URL}/${region_id}`);
       const forecasts = response.data;
       
       if (forecasts && forecasts.length > 0) {
-        // Look at the lowest point in the next 7 days (Worst Case Scenario)
-        // We use Math.min(...) to be conservative
         predictedLevel = Math.min(...forecasts.map(f => f.predicted_level));
       }
     } catch (err) {
       console.warn("⚠️ Service B Unreachable. Proceeding with caution (Fail Open).");
-      // In strict mode, you might throw an error here to 'Fail Closed'
     }
 
-    // B. Calculate Impact
+    // B. Calculate Impact using REAL PHYSICS
     if (predictedLevel !== null) {
-      // Rough Physics: 100,000L extracted ≈ 0.1m drop (Simplified for this region size)
-      // In a real app, this formula would come from the hydro-geology service
-      const estimatedDrop = (volume_liters / 100000) * 0.1;
+      const volume_m3 = volume_liters / 1000.0;
+      const area = region.aquifer_area_m2 || 1000000; 
+      const sy = region.specific_yield || 0.15;
+
+      const estimatedDrop = volume_m3 / (area * sy);
       const finalLevel = predictedLevel - estimatedDrop;
 
-      console.log(`🔍 Check: Forecast=${predictedLevel}m | Drop=${estimatedDrop}m | Final=${finalLevel}m | Limit=${region.critical_water_level_m}m`);
+      console.log(`🔍 Physics Check: Vol=${volume_m3}m³ | Area=${area}m² | Sy=${sy}`);
+      console.log(`   📉 Predicted Drop: ${estimatedDrop.toFixed(4)}m | Final Level: ${finalLevel.toFixed(4)}m`);
 
-      // C. The Decision
+      // C. The Decision (Block if Unsafe)
       if (finalLevel < region.critical_water_level_m) {
         return res.status(409).json({
           success: false,
@@ -63,6 +61,7 @@ export const createLog = async (req, res, next) => {
             predicted_level_next_7d: predictedLevel,
             impact_of_extraction: -estimatedDrop,
             critical_limit: region.critical_water_level_m,
+            physics_used: { area_m2: area, specific_yield: sy },
             message: "Please reduce extraction volume or wait for recharge."
           }
         });
@@ -70,7 +69,7 @@ export const createLog = async (req, res, next) => {
     }
     // --- 🛡️ SAFE YIELD ENFORCEMENT END ---
 
-    // 3. Create Log (If allowed)
+    // ✅ FIXED: 3. Create Log & Send Success Response (This was missing)
     const log = await ExtractionLog.create({
       region_id,
       volume_liters,
@@ -83,7 +82,6 @@ export const createLog = async (req, res, next) => {
     next(error);
   }
 };
-
 // @desc    Get extraction history for a region
 // @route   GET /api/v1/extraction/:region_id
 export const getExtractionHistory = async (req, res, next) => {

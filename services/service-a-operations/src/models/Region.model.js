@@ -36,6 +36,20 @@ const RegionSchema = new mongoose.Schema({
     required: true
   }, // <--- FIXED: Added missing comma here
 
+  // 🆕 HYDROLOGICAL PROPERTIES
+  aquifer_area_m2: { 
+    type: Number, 
+    default: 1000000, // Default: 1 sq km (1000m x 1000m)
+    required: true 
+  },
+  specific_yield: { 
+    type: Number, 
+    default: 0.15, // Default: 15% (Typical for Sandy Loam)
+    required: true,
+    min: 0.01,
+    max: 0.50
+  },
+
   created_at: { 
     type: Date, 
     default: Date.now 
