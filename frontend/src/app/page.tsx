@@ -1,211 +1,47 @@
-'use client';
+import { Activity, Droplets, Map, AlertTriangle } from 'lucide-react';
+import SimulationLab from '@/components/dashboard/SimulationLab';
 
-import { useEffect, useState } from 'react';
-import { fetchRegions, fetchHistoricalData, fetchForecasts, fetchRainfallData } from '@/lib/api';
-import { Region, WaterReading, Forecast, RainfallReading } from '@/types';
-import { AlertCircle, Loader2 } from 'lucide-react';
-
-// Components
-import RegionSelect from '@/components/dashboard/RegionSelect';
-import HydroComboChart from '@/components/dashboard/HydroComboChart'; 
-import PipelineStatus from '@/components/dashboard/PipelineStatus';
-import PipelineControls from '@/components/dashboard/PipelineControls';
-import DataIngestion from '@/components/dashboard/DataIngestion';
-import KPIGrid from '@/components/dashboard/KPIGrid';
-import SystemHealth from '@/components/dashboard/SystemHealth';
-import Groundwater3DScene from '@/components/dashboard/Groundwater3DScene'; // <--- [NEW] Import 3D Scene
-
-export default function DashboardPage() {
-  // --- Global State ---
-  const [regions, setRegions] = useState<Region[]>([]);
-  const [selectedRegionId, setSelectedRegionId] = useState<string>('');
-  
-  // --- Data State ---
-  const [history, setHistory] = useState<WaterReading[]>([]);
-  const [forecasts, setForecasts] = useState<Forecast[]>([]);
-  const [rainfall, setRainfall] = useState<RainfallReading[]>([]);
-  
-  // --- UX State ---
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-
-  // 1. Initial Boot: Load Regions
-  useEffect(() => {
-    async function init() {
-      try {
-        const res = await fetchRegions();
-        if (res.data && res.data.length > 0) {
-          setRegions(res.data);
-          setSelectedRegionId(res.data[0].region_id);
-        } else {
-          setError("No regions found in the database.");
-        }
-      } catch (err) {
-        console.error(err);
-        setError("Failed to connect to Operations Service (A).");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    init();
-  }, []);
-
-  // 2. Data Fetching: Runs on Region Change or Manual Refresh
-  useEffect(() => {
-    if (!selectedRegionId) return;
-
-    async function loadData() {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        // Parallel Fetch for Speed
-        const [histRes, fcRes, rainRes] = await Promise.all([
-          fetchHistoricalData(selectedRegionId),
-          fetchForecasts(selectedRegionId),
-          fetchRainfallData(selectedRegionId)
-        ]);
-
-        setHistory(histRes.data || []);
-        setForecasts(fcRes.data || []);
-        setRainfall(rainRes.data || []);
-      } catch (err) {
-        console.error("Data Load Error:", err);
-        setError("Failed to load analytics data. Services may be busy.");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
-    loadData();
-  }, [selectedRegionId, refreshTrigger]);
-
-  const currentRegion = regions.find(r => r.region_id === selectedRegionId);
-
-  // [NEW] Helper: Get latest values for 3D Scene
-  // We assume the data is sorted or we take the last entry as "current"
-  const latestWaterLevel = history.length > 0 ? history[history.length - 1].water_level : 0;
-  // If rainfall data is daily, we might just show the last record's intensity
-  const latestRainfall = rainfall.length > 0 ? rainfall[rainfall.length - 1].amount_mm : 0;
-
+export default function Home() {
   return (
-    // UPDATED: Changed background to bg-slate-100 for better contrast with white cards
-    <main className="min-h-screen bg-slate-100 p-6 md:p-8 pb-16 relative text-slate-900 font-sans">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <main className="min-h-screen bg-slate-50 p-8">
+      {/* Header */}
+      <header className="mb-8">
+        <h1 className="text-3xl font-bold text-slate-900">Groundwater Command Center</h1>
+        <p className="text-slate-600">Real-time Aquifer Monitoring & AI Forecasting</p>
+      </header>
+
+      {/* KPI Grid Placeholder (We'll wire this up next) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-slate-500 text-sm font-medium">Active Regions</h3>
+            <Map className="text-blue-500 h-5 w-5" />
+          </div>
+          <p className="text-2xl font-bold text-slate-800">--</p>
+        </div>
         
-        {/* --- Header Section --- */}
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-6">
-          <div>
-            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Groundwater Command Center</h1>
-            <p className="text-slate-500 mt-1 flex items-center gap-2 font-medium">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-sm shadow-emerald-200" />
-              Real-time Aquifer Monitoring System
-            </p>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-slate-500 text-sm font-medium">System Health</h3>
+            <Activity className="text-green-500 h-5 w-5" />
           </div>
-          <PipelineStatus onSuccess={() => setRefreshTrigger(prev => prev + 1)} />
-        </header>
-
-        {/* --- Navigation & Context --- */}
-        {/* UPDATED: Sharper border (border-slate-200) and distinct shadow */}
-        <section className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 transition-all hover:shadow-md">
-          <RegionSelect 
-            regions={regions} 
-            selectedId={selectedRegionId} 
-            onSelect={setSelectedRegionId} 
-          />
-        </section>
-
-        {/* --- Error Boundary UI --- */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl flex items-center gap-3 shadow-sm">
-            <AlertCircle className="w-5 h-5" />
-            <span className="font-medium">{error}</span>
-            <button 
-              onClick={() => setRefreshTrigger(prev => prev + 1)}
-              className="ml-auto text-sm font-semibold underline hover:text-red-900"
-            >
-              Retry Connection
-            </button>
-          </div>
-        )}
-
-        {/* --- Main Content Area --- */}
-        {isLoading && !history.length ? (
-          <DashboardSkeleton />
-        ) : (
-          <>
-            {/* KPI Section */}
-            <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <KPIGrid 
-                history={history}
-                forecasts={forecasts}
-                rainfall={rainfall}
-                criticalLevel={currentRegion?.critical_level || 0}
-              />
-            </section>
-
-            {/* Analytics Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
-              
-              {/* Left Column: Main Charts (Takes up 2/3 width) */}
-              <div className="lg:col-span-2 space-y-6">
-                <HydroComboChart 
-                  history={history} 
-                  forecasts={forecasts} 
-                  rainfall={rainfall}
-                  criticalLevel={currentRegion?.critical_level || 0} 
-                />
-              </div>
-
-              {/* Right Column: 3D Visualization & Operations (Takes up 1/3 width) */}
-              <div className="space-y-6">
-                
-                {/* [NEW] 3D Groundwater Visualization */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                  <div className="mb-4">
-                    <h3 className="text-lg font-bold text-slate-800">Live Digital Twin</h3>
-                    <p className="text-xs text-slate-500">3D Simulation of Aquifer Depth & Rainfall</p>
-                  </div>
-                  <Groundwater3DScene 
-                    waterLevel={latestWaterLevel} 
-                    rainfall={latestRainfall} 
-                  />
-                </div>
-
-                {/* Operations Controls */}
-                <PipelineControls />
-                <DataIngestion />
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Footer Status Bar */}
-      <SystemHealth />
-    </main>
-  );
-}
-
-// --- Sub-Component: Loading Skeleton ---
-function DashboardSkeleton() {
-  return (
-    <div className="space-y-6 animate-pulse">
-      {/* KPI Skeleton */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="h-28 bg-slate-200 rounded-xl shadow-sm border border-slate-300/50"></div>
-        ))}
-      </div>
-      {/* Main Grid Skeleton */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 h-[500px] bg-slate-200 rounded-xl shadow-sm border border-slate-300/50"></div>
-        <div className="space-y-6">
-          <div className="h-[300px] bg-slate-200 rounded-xl shadow-sm border border-slate-300/50"></div>
-          <div className="h-[200px] bg-slate-200 rounded-xl shadow-sm border border-slate-300/50"></div>
+          <p className="text-2xl font-bold text-slate-800">Online</p>
         </div>
       </div>
-    </div>
+
+      {/* Content Area - Simulation Lab Demo */}
+      <div className="grid grid-cols-1 gap-8">
+        <div className="h-[600px]"> 
+          {/* Using the hardcoded Region ID from your backend tests.
+              In the final version, this will be dynamic.
+          */}
+          <SimulationLab 
+            regionId="65f4fc28-a5f9-47e0-b326-962b20bb35b1" 
+            regionName="Nagpur Zone 1" 
+            criticalLevel={10.0} 
+          />
+        </div>
+      </div>
+    </main>
   );
 }
