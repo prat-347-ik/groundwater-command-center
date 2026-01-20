@@ -20,7 +20,8 @@ class ForecastResponse(BaseModel):
 
 class GenerateRequest(BaseModel):
     region_id: str
-    planned_extraction: Optional[float] = None # New optional field for simulation
+    # 🆕 CHANGED: Now accepts a list of daily extraction values for the 7-day horizon
+    planned_extraction: Optional[List[float]] = None 
 
 # --- Routes ---
 
@@ -28,16 +29,19 @@ class GenerateRequest(BaseModel):
 def generate_forecast(payload: GenerateRequest):
     """
     Triggers the Random Forest inference.
-    If 'planned_extraction' is provided, runs a simulation and returns the data (What-If Mode).
+    If 'planned_extraction' is provided (as a list), runs a simulation and returns the data (What-If Mode).
     If not provided, runs standard batch inference and saves to DB (Production Mode).
     """
     try:
         if payload.planned_extraction is not None:
             # --- SCENARIO MODE ---
-            logger_msg = f"Running scenario for {payload.region_id} with {payload.planned_extraction}L extraction."
+            # 🆕 UPDATED: Pass the list as 'planned_extraction_schedule'
+            # We log the schedule to verify what the user sent
+            print(f"🧪 Running scenario for {payload.region_id} | Schedule: {payload.planned_extraction}")
+            
             results = run_inference(
                 region_id_filter=payload.region_id, 
-                planned_extraction_liters=payload.planned_extraction
+                planned_extraction_schedule=payload.planned_extraction
             )
             return {
                 "status": "success",
@@ -81,4 +85,7 @@ def get_forecasts(region_id: str):
             scenario_extraction=doc.get("scenario_extraction", 0.0)
         ))
     
+    if not results:
+        return []
+        
     return results

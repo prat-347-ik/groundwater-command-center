@@ -13,7 +13,7 @@ const ExtractionSchema = new mongoose.Schema({
   },
   usage_type: { 
     type: String,
-    enum: ['irrigation', 'industrial', 'domestic'], 
+    enum: ['irrigation', 'industrial', 'domestic','industrial_cooling'], // 🆕 Added 'industrial_cooling'
     required: true 
   },
   timestamp: { 
