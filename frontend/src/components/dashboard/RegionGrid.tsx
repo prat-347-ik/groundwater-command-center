@@ -44,7 +44,7 @@ export default function RegionGrid() {
           key={region._id} 
           // 🛑 WAS: href={`/simulation/${region._id}`}
           // ✅ FIX: Use the UUID 'region_id'
-          href={`/simulation/${region.region_id}`}
+          href={`/regions/${region.region_id}`}
           className="group relative block bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300 transition-all p-6"
         >
           <div className="flex justify-between items-start mb-4">

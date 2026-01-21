@@ -43,7 +43,6 @@ export default function UnifiedChart({ history, forecast, rainfall = [], critica
     entry.forecast = item.predicted_level;
   });
 
-  // Process Rainfall
 // Process Rainfall
   rainfall.forEach(item => {
     // ❌ WAS: const entry = getEntry(item.date);
