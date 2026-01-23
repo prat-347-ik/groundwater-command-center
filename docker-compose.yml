@@ -1,0 +1,61 @@
+services:
+  # --- Service A: Operations (Node.js) ---
+  service-a:
+    build: ./services/service-a-operations
+    container_name: service_a_ops
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV}
+      MONGO_URI: ${MONGO_ATLAS_URI}
+      # 👇 FIX: Point to the internal Docker container names, not localhost
+      SERVICE_B_URL: "http://service_b_analytics:8000"
+      SERVICE_C_URL: "http://service_c_climate:8100"
+    networks:
+      - groundwater_net
+
+  # --- Service B: Analytics (Python/ML) ---
+  service-b:
+    build: ./services/service-b-analytics
+    container_name: service_b_analytics
+    ports:
+      - "8000:8000"
+    environment:
+      MONGO_URI: ${MONGO_ATLAS_URI}
+      MONGO_DB_NAME: ${DB_NAME_OPS}
+      ANALYTICS_DB_NAME: ${DB_NAME_ANALYTICS}
+    depends_on:
+      - service-a
+    networks:
+      - groundwater_net
+
+  # --- Service C: Climate (Python) ---
+  service-c:
+    build: ./services/service-c-climate
+    container_name: service_c_climate
+    ports:
+      - "8100:8100"
+    environment:
+      MONGO_URI: ${MONGO_ATLAS_URI}
+      DB_NAME: ${DB_NAME_CLIMATE}
+    networks:
+      - groundwater_net
+
+  # --- Frontend (Next.js) ---
+  frontend:
+    build: ./frontend
+    container_name: groundwater_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # Browser access (Use localhost if running on your machine)
+      NEXT_PUBLIC_API_URL_A: "http://localhost:4000"
+      NEXT_PUBLIC_API_URL_B: "http://localhost:8000"
+      NEXT_PUBLIC_API_URL_C: "http://localhost:8100"
+    networks:
+      - groundwater_net
+
+networks:
+  groundwater_net:
+    driver: bridge
