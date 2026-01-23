@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { ExtractionLog } from '@/types'; // Ensure you have this type defined in types/index.ts
 
 // --- Configuration ---
 // These match the ports we defined in your backend services
@@ -34,3 +35,35 @@ const handleApiError = (error: any) => {
 opsClient.interceptors.response.use((r) => r, handleApiError);
 analyticsClient.interceptors.response.use((r) => r, handleApiError);
 climateClient.interceptors.response.use((r) => r, handleApiError);
+
+// ==========================================
+// 💧 Extraction & Operations API
+// ==========================================
+
+// Get history of extractions for a specific region
+export const getExtractionHistory = async (regionId: string) => {
+  // Matches GET /api/v1/extraction/:region_id
+  const response = await opsClient.get<{success: boolean, data: ExtractionLog[]}>(`/extraction/${regionId}`);
+  return response.data.data;
+};
+
+// Log a new extraction event
+export const createExtractionLog = async (data: { region_id: string; volume_liters: number; usage_type: string }) => {
+  // Matches POST /api/v1/extraction
+  const response = await opsClient.post('/extraction', data);
+  return response.data;
+};
+
+// Get water readings (for correlation charts)
+export const getWaterReadings = async (regionId: string) => {
+  // Matches GET /api/v1/water-readings?region_id=...
+  const response = await opsClient.get(`/water-readings?region_id=${regionId}&limit=100`);
+  return response.data.data; 
+};
+
+// Get static region details (for Safe Yield limits)
+export const getRegionDetails = async (regionId: string) => {
+  // Matches GET /api/v1/regions/:id
+  const response = await opsClient.get(`/regions/${regionId}`);
+  return response.data;
+};
