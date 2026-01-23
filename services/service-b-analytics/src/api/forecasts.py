@@ -4,8 +4,8 @@ from datetime import datetime
 from src.config.mongo_client import mongo_client
 from pydantic import BaseModel
 
-# Import the updated inference engine
-from src.inference.predictor import run_inference
+# Import the updated inference engine functions
+from src.inference.predictor import run_inference, predict_scenario, get_feature_importance
 
 router = APIRouter(prefix="/api/v1/forecasts", tags=["Forecasts"])
 
@@ -22,6 +22,11 @@ class GenerateRequest(BaseModel):
     region_id: str
     # 🆕 CHANGED: Now accepts a list of daily extraction values for the 7-day horizon
     planned_extraction: Optional[List[float]] = None 
+
+class SimulationRequest(BaseModel):
+    region_id: str
+    rainfall_modifier: float  # 1.0 = 100%
+    extraction_modifier: float # 1.0 = 100%
 
 # --- Routes ---
 
@@ -61,6 +66,28 @@ def generate_forecast(payload: GenerateRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/simulate")
+def run_simulation(req: SimulationRequest):
+    """Run a What-If scenario using the Random Forest model (Slider Interface)."""
+    try:
+        result = predict_scenario(
+            req.region_id, 
+            req.rainfall_modifier, 
+            req.extraction_modifier
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/importance/{region_id}")
+def get_feature_drivers(region_id: str):
+    """Get Top Driving Factors for the region's groundwater levels."""
+    try:
+        data = get_feature_importance(region_id)
+        return {"region_id": region_id, "importance": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/{region_id}", response_model=List[ForecastResponse])
 def get_forecasts(region_id: str):
     """
@@ -80,7 +107,7 @@ def get_forecasts(region_id: str):
             region_id=doc["region_id"],
             forecast_date=doc["forecast_date"],
             predicted_level=doc["predicted_level"],
-            model_version=doc["model_version"],
+            model_version=doc.get("model_version", "unknown"),
             horizon_step=doc["horizon_step"],
             scenario_extraction=doc.get("scenario_extraction", 0.0)
         ))

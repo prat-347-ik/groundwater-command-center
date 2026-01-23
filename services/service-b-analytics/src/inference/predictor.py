@@ -87,14 +87,121 @@ def generate_seasonality_features(date: pd.Timestamp) -> Dict[str, float]:
         "feat_cos_day": np.cos(2 * np.pi * day_of_year / 365.0)
     }
 
+# ==========================================
+# 🔮 NEW: Simulation & Explainability Logic
+# ==========================================
+
+def get_feature_importance(region_id: str) -> List[Dict[str, Any]]:
+    """Extracts feature importance from the active model."""
+    models = load_active_models()
+    model = models.get(region_id)
+    
+    if not model:
+        logger.warning(f"No active model found for {region_id}")
+        return []
+
+    try:
+        # Handle Pipeline object (if wrapped) or raw Regressor
+        if hasattr(model, 'feature_importances_'):
+            importances = model.feature_importances_
+        elif hasattr(model, 'steps'): # Sklearn Pipeline
+            # Assuming RF is the last step
+            importances = model.steps[-1][1].feature_importances_
+        else:
+            return []
+
+        # Map to feature names
+        result = [
+            {"feature": feat, "importance": float(imp)}
+            for feat, imp in zip(FEATURES, importances)
+        ]
+        # Sort descending
+        return sorted(result, key=lambda x: x['importance'], reverse=True)
+    except Exception as e:
+        logger.error(f"Error extracting importance: {e}")
+        return []
+
+def predict_scenario(region_id: str, rainfall_mod: float, extraction_mod: float) -> Dict[str, Any]:
+    """
+    Runs a single-step simulation with modified inputs.
+    rainfall_mod: Multiplier (e.g. 0.8 for -20%)
+    extraction_mod: Multiplier (e.g. 1.1 for +10%)
+    """
+    models = load_active_models()
+    model = models.get(region_id)
+    
+    if not model:
+        raise ValueError(f"Model for {region_id} not found")
+
+    # Fetch just the latest data point
+    history_df = get_recent_history([region_id])
+    if history_df.empty:
+        raise ValueError(f"No history data for {region_id}")
+
+    # Use the last known state
+    last_row = history_df.iloc[-1].copy()
+    
+    # --- Prepare Input Vectors ---
+    
+    def prepare_vector(row_data, apply_mods=False):
+        # Base values
+        eff_rain = row_data.get('effective_rainfall', 0)
+        log_ext = row_data.get('log_extraction', 0)
+
+        if apply_mods:
+            # Apply Rainfall Modifier (Linear)
+            eff_rain *= rainfall_mod
+            
+            # Apply Extraction Modifier (Non-linear due to Log transform)
+            # 1. Reverse Log: log(vol + 1) -> vol
+            current_vol = np.expm1(log_ext)
+            # 2. Apply Modifier
+            new_vol = current_vol * extraction_mod
+            # 3. Re-apply Log
+            log_ext = np.log1p(new_vol)
+
+        # Recalculate Flux (Proxy)
+        # Assuming flux = rain - (extract * constant)
+        # We approximate the lag features for this single step simulation 
+        # by keeping them constant or slightly adjusting flux derived features
+        
+        return pd.DataFrame([{
+            'effective_rainfall': eff_rain,
+            'log_extraction': log_ext,
+            'feat_net_flux_1d_lag': row_data.get('feat_net_flux_1d_lag', 0),
+            'feat_net_flux_window_sum': row_data.get('feat_net_flux_window_sum', 0),
+            'feat_water_trend_7d': row_data.get('feat_water_trend_7d', 0),
+            'feat_soil_permeability': row_data.get('feat_soil_permeability', 0.15),
+            'feat_sin_day': row_data.get('feat_sin_day', 0),
+            'feat_cos_day': row_data.get('feat_cos_day', 0)
+        }])
+
+    # 1. Baseline Prediction
+    vec_baseline = prepare_vector(last_row, apply_mods=False)
+    pred_baseline = model.predict(vec_baseline)[0]
+
+    # 2. Simulated Prediction
+    vec_sim = prepare_vector(last_row, apply_mods=True)
+    pred_sim = model.predict(vec_sim)[0]
+
+    return {
+        "region_id": region_id,
+        "baseline_level": float(pred_baseline),
+        "simulated_level": float(pred_sim),
+        "delta": float(pred_sim - pred_baseline),
+        "modifiers": {
+            "rainfall": rainfall_mod,
+            "extraction": extraction_mod
+        }
+    }
+
+# ==========================================
+# 🏃 Standard Batch Inference
+# ==========================================
+
 def run_inference(region_id_filter: Optional[str] = None, planned_extraction_schedule: Optional[List[float]] = None) -> List[Dict[str, Any]]:
     """
-    Main Forecasting Routine.
-    
-    Args:
-        region_id_filter: If provided, only runs for this specific region.
-        planned_extraction_schedule: List of 7 floats representing extraction (Liters) for Day 1 to Day 7.
-                                     If provided, runs a 'What-If' scenario. (Does NOT save to DB).
+    Main Forecasting Routine (7-Day Horizon).
     """
     try:
         # 1. Load Models
@@ -132,13 +239,11 @@ def run_inference(region_id_filter: Optional[str] = None, planned_extraction_sch
                 next_date = last_date + timedelta(days=i)
                 
                 # --- A. External Forcings ---
-                eff_rain = 0.0
+                eff_rain = 0.0 # Future rain assumption (0 for conservative forecast)
                 
-                # 🆕 HANDLE SCHEDULE LIST
+                # Handle Schedule
                 current_planned_extraction = 0.0
                 if planned_extraction_schedule:
-                    # Map Horizon Step (1-7) to List Index (0-6)
-                    # If schedule is shorter than horizon, default to 0
                     idx = i - 1
                     if 0 <= idx < len(planned_extraction_schedule):
                         current_planned_extraction = planned_extraction_schedule[idx]
@@ -147,7 +252,6 @@ def run_inference(region_id_filter: Optional[str] = None, planned_extraction_sch
                 if mode_label == "SCENARIO":
                     log_ext = np.log1p(current_planned_extraction)
                 else:
-                    # Default assumption: Zero extraction for future
                     log_ext = 0.0
                 
                 # --- B. Calculate Derived Physics ---
