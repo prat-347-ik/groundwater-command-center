@@ -1,7 +1,7 @@
 "use client";
 
 import { ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine } from 'recharts';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 
 interface UnifiedChartProps {
   history: any[];
@@ -10,14 +10,37 @@ interface UnifiedChartProps {
   criticalLevel: number;
 }
 
+// 🎨 Custom Tooltip Component
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-white p-3 border border-slate-200 shadow-xl rounded-lg ring-1 ring-slate-100">
+        <p className="text-sm font-bold text-slate-700 mb-2">{label}</p>
+        {payload.map((entry: any, index: number) => (
+          <div key={index} className="flex items-center gap-2 text-xs font-medium">
+            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span className="text-slate-500">{entry.name}:</span>
+            <span className="text-slate-900">
+              {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}
+              {entry.unit}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
+
 export default function UnifiedChart({ history, forecast, rainfall = [], criticalLevel }: UnifiedChartProps) {
   
-  // 1. Merge all data sources by Date
   const dataMap = new Map();
 
-  // Helper to init date entry
   const getEntry = (dateStr: string) => {
-    const key = dateStr.split('T')[0]; // Simple YYYY-MM-DD key
+    if (!dateStr) return null;
+    // Robust date parsing handles both "2024-01-01" and ISO strings
+    const key = format(new Date(dateStr), 'yyyy-MM-dd');
+    
     if (!dataMap.has(key)) {
       dataMap.set(key, { 
         date: key, 
@@ -30,99 +53,113 @@ export default function UnifiedChart({ history, forecast, rainfall = [], critica
     return dataMap.get(key);
   };
 
-  // Process History
   history.forEach(item => {
     const entry = getEntry(item.timestamp);
-    entry.historical = item.water_level;
+    if(entry) entry.historical = item.water_level;
   });
 
-  // Process Forecast
   forecast.forEach(item => {
     const entry = getEntry(item.forecast_date);
-    entry.forecast = item.predicted_level;
+    if(entry) entry.forecast = item.predicted_level;
   });
 
-  // Process Rainfall
   rainfall.forEach(item => {
-    if (item.timestamp && item.amount_mm !== undefined) {
-      const entry = getEntry(item.timestamp); 
+    const entry = getEntry(item.timestamp || item.date); 
+    if(entry && item.amount_mm !== undefined) {
       entry.rainfall = item.amount_mm;        
     }
   });
 
-  // Convert map to sorted array
-  const combinedData = Array.from(dataMap.values()).sort((a, b) => 
+  let combinedData = Array.from(dataMap.values()).sort((a, b) => 
     new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
+  // 🔌 CONNECT THE LINES: Fill gap between History and Forecast
+  // If we have history but no forecast for a day, and the NEXT day is forecast...
+  // (Simplified approach: Simply allow Recharts to connect dots if needed, 
+  // but better to explicitly set the last history point as the start of forecast line)
+  const lastHistoryIndex = combinedData.findLastIndex(d => d.historical !== null);
+  if (lastHistoryIndex >= 0 && lastHistoryIndex < combinedData.length - 1) {
+    // Copy the last historical value to the forecast field of the same day
+    // This makes the forecast line start exactly where history ends
+    combinedData[lastHistoryIndex].forecast = combinedData[lastHistoryIndex].historical;
+  }
+
   return (
-    <div className="h-[450px] w-full bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-      <h3 className="text-sm font-bold text-slate-700 mb-4">Hydrological Correlation</h3>
+    <div className="h-[400px] md:h-[450px] w-full bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-bold text-slate-700">Hydrological Correlation</h3>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span className="w-2 h-2 rounded-full bg-red-500"></span>
+          Critical Limit: {criticalLevel}m
+        </div>
+      </div>
       
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={combinedData}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <ComposedChart data={combinedData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
           
-          <XAxis dataKey="displayDate" tick={{fontSize: 12}} />
+          <XAxis 
+            dataKey="displayDate" 
+            tick={{fontSize: 11, fill: '#64748b'}} 
+            tickLine={false}
+            axisLine={false}
+            dy={10}
+          />
           
-          {/* Left Axis: Groundwater Depth (m) */}
           <YAxis 
             yAxisId="left"
-            label={{ value: 'Depth (m)', angle: -90, position: 'insideLeft' }} 
-            domain={['auto', 'auto']}
-            reversed={true} // Groundwater is deeper as number gets bigger
+            tick={{fontSize: 11, fill: '#64748b'}}
+            tickLine={false}
+            axisLine={false}
+            reversed={true} 
+            unit="m"
           />
 
-          {/* Right Axis: Rainfall (mm) */}
           <YAxis 
             yAxisId="right" 
             orientation="right" 
-            label={{ value: 'Rainfall (mm)', angle: 90, position: 'insideRight' }}
+            tick={{fontSize: 11, fill: '#94a3b8'}}
+            tickLine={false}
+            axisLine={false}
+            unit="mm"
           />
 
-          <Tooltip 
-            labelStyle={{ color: '#64748b' }}
-            itemStyle={{ fontSize: 14 }}
-            // ✅ FIX: Allow 'any' type to satisfy Recharts strict typing
-            formatter={(value: any) => 
-              (typeof value === 'number') ? value.toFixed(2) : 'N/A'
-            }
-          />
-          <Legend verticalAlign="top" height={36}/>
+          <Tooltip content={<CustomTooltip />} />
+          <Legend verticalAlign="top" height={36} iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '12px' }}/>
 
-          <ReferenceLine yAxisId="left" y={criticalLevel} stroke="#ef4444" strokeDasharray="3 3" label="Critical" />
+          <ReferenceLine yAxisId="left" y={criticalLevel} stroke="#ef4444" strokeDasharray="3 3" />
 
-          {/* Rainfall Bars (Blue-ish gray) */}
           <Bar 
             yAxisId="right" 
             dataKey="rainfall" 
-            name="Rainfall (mm)" 
-            fill="#94a3b8" 
-            opacity={0.3} 
-            barSize={20}
+            name="Rainfall" 
+            fill="#cbd5e1" 
+            barSize={12}
+            radius={[2, 2, 0, 0]}
           />
 
-          {/* Historical Line */}
           <Line 
             yAxisId="left"
             type="monotone" 
             dataKey="historical" 
-            name="Observed Level" 
+            name="Observed" 
             stroke="#2563eb" 
-            strokeWidth={3} 
+            strokeWidth={2.5} 
             dot={false}
+            activeDot={{ r: 6 }}
           />
 
-          {/* Forecast Line */}
           <Line 
             yAxisId="left"
             type="monotone" 
             dataKey="forecast" 
             name="AI Forecast" 
             stroke="#7c3aed" 
-            strokeWidth={3} 
-            strokeDasharray="5 5"
-            dot={{ r: 4 }}
+            strokeWidth={2.5} 
+            strokeDasharray="4 4"
+            dot={false}
+            activeDot={{ r: 6 }}
           />
         </ComposedChart>
       </ResponsiveContainer>

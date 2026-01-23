@@ -18,7 +18,8 @@ import {
   AlertTriangle, 
   Droplets, 
   TrendingDown, 
-  TrendingUp 
+  TrendingUp,
+  Activity
 } from 'lucide-react';
 import { analyticsClient } from '@/lib/api';
 import { format, addDays } from 'date-fns';
@@ -47,6 +48,9 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
   const [loading, setLoading] = useState(false);
   const [hasRun, setHasRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Constants
+  const MAX_EXTRACTION_LITERS = 1000000; // 1000 kL
 
   // Initialize: Run baseline once on mount
   useEffect(() => {
@@ -107,47 +111,47 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
   const maxDrop = Math.min(...chartData.map(d => d.delta)); // Biggest negative number
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden ring-1 ring-slate-900/5">
+    <div className="flex flex-col h-full bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden ring-1 ring-slate-900/5 font-sans">
       
       {/* --- Header --- */}
-      <div className="px-6 py-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-slate-50 to-white">
+      <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg">
-              <Droplets className="w-5 h-5" />
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+              <Activity className="w-5 h-5" />
             </div>
-            <h2 className="text-xl font-bold text-slate-800 tracking-tight">Simulation Lab</h2>
+            <h2 className="text-xl font-bold text-slate-800 tracking-tight">Predictive Lab</h2>
           </div>
-          <p className="text-sm text-slate-500 font-medium">
-            Projecting impact for <span className="text-slate-800">{regionName}</span>
+          <p className="text-xs text-slate-500 font-medium ml-1">
+            Target Region: <span className="text-indigo-600 font-bold">{regionName}</span>
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <button 
             onClick={() => { setSchedule(Array(7).fill(0)); runSimulation(); }}
-            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-2"
+            className="px-4 py-2 text-xs font-semibold text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors flex items-center gap-2 border border-transparent hover:border-indigo-100"
           >
-            <RotateCcw className="w-4 h-4" /> Reset
+            <RotateCcw className="w-3.5 h-3.5" /> Reset
           </button>
           
           <button 
             onClick={() => runSimulation()}
             disabled={loading}
             className={`
-              px-6 py-2.5 rounded-lg text-sm font-bold text-white shadow-lg shadow-blue-500/30 
+              px-6 py-2.5 rounded-lg text-sm font-bold text-white shadow-lg shadow-indigo-500/20 
               flex items-center gap-2 transition-all active:scale-95
-              ${loading ? 'bg-blue-400 cursor-wait' : 'bg-blue-600 hover:bg-blue-700 hover:shadow-blue-500/40'}
+              ${loading ? 'bg-indigo-400 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-500/30'}
             `}
           >
             {loading ? (
               <span className="flex items-center gap-2">
                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Processing...
+                Calculating...
               </span>
             ) : (
               <>
-                <Play className="w-4 h-4 fill-current" /> Run Scenario
+                <Play className="w-4 h-4 fill-current" /> Run Simulation
               </>
             )}
           </button>
@@ -156,48 +160,53 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
 
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         
-        {/* --- Left Panel: Controls --- */}
-        <div className="w-full lg:w-80 bg-slate-50 border-r border-slate-100 flex flex-col overflow-hidden">
-          <div className="p-5 border-b border-slate-200/60 bg-white">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Input Parameters</h3>
-            <p className="text-sm text-slate-600 font-medium">Daily Extraction Plan (7 Days)</p>
+        {/* --- Left Panel: Controls (Dark Theme) --- */}
+        <div className="w-full lg:w-80 bg-slate-900 border-r border-slate-800 flex flex-col overflow-hidden relative">
+          {/* Subtle gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none" />
+          
+          <div className="p-5 border-b border-slate-800 bg-slate-900/50 backdrop-blur relative z-10">
+            <h3 className="text-xs font-bold text-indigo-400 uppercase tracking-wider mb-1 flex items-center gap-2">
+              <Droplets className="w-3 h-3" /> Extraction Schedule
+            </h3>
+            <p className="text-xs text-slate-400 font-medium">Adjust daily pumping volume (7-Day)</p>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar relative z-10">
             {schedule.map((val, i) => {
               const dayLabel = format(addDays(new Date(), i + 1), 'EEE');
-              const percent = (val / 100000) * 100;
+              const percent = (val / MAX_EXTRACTION_LITERS) * 100;
               
               return (
                 <div key={i} className="group">
                   <div className="flex justify-between items-end mb-2">
-                    <span className="text-xs font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded text-center min-w-[3rem]">
+                    <span className="text-xs font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded text-center min-w-[3rem] group-hover:text-indigo-300 transition-colors">
                       {dayLabel}
                     </span>
-                    <span className="text-sm font-mono font-bold text-blue-600">
-                      {(val / 1000).toFixed(1)} <span className="text-xs text-slate-400 font-sans">kL</span>
+                    <span className="text-sm font-mono font-bold text-white">
+                      {(val / 1000).toFixed(0)} <span className="text-xs text-slate-500 font-sans">kL</span>
                     </span>
                   </div>
                   
-                  <div className="relative h-6 flex items-center">
+                  <div className="relative h-5 flex items-center group">
                     <input 
                       type="range" 
-                      min="0" max="100000" step="1000"
+                      min="0" max={MAX_EXTRACTION_LITERS} step="10000"
                       value={val}
                       onChange={(e) => handleSliderChange(i, Number(e.target.value))}
                       className="absolute z-20 w-full h-full opacity-0 cursor-pointer"
                     />
-                    {/* Custom Track */}
-                    <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden relative z-10">
+                    {/* Dark Track */}
+                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden relative z-10">
                       <div 
-                        className="h-full bg-gradient-to-r from-blue-400 to-blue-600 transition-all duration-150 ease-out"
+                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-150 ease-out shadow-[0_0_10px_rgba(99,102,241,0.5)]"
                         style={{ width: `${percent}%` }}
                       />
                     </div>
-                    {/* Thumb Indicator (Visual only) */}
+                    {/* Thumb Glow */}
                     <div 
-                      className="absolute h-4 w-4 bg-white border-2 border-blue-500 rounded-full shadow-md z-10 pointer-events-none transition-all duration-150 ease-out"
-                      style={{ left: `calc(${percent}% - 8px)` }}
+                      className="absolute h-3 w-3 bg-white rounded-full shadow-lg shadow-indigo-500/50 z-10 pointer-events-none transition-all duration-150 ease-out group-hover:scale-125"
+                      style={{ left: `calc(${percent}% - 6px)` }}
                     />
                   </div>
                 </div>
@@ -207,30 +216,30 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
         </div>
 
         {/* --- Right Panel: Charts & Stats --- */}
-        <div className="flex-1 flex flex-col min-h-[400px] relative bg-white">
+        <div className="flex-1 flex flex-col min-h-[400px] relative bg-slate-50/50">
           
           {/* Stats Bar */}
-          <div className="grid grid-cols-2 border-b border-slate-100 divide-x divide-slate-100">
-            <div className={`p-4 flex items-center gap-3 ${isCritical ? 'bg-red-50/50' : 'bg-emerald-50/50'}`}>
-              <div className={`p-2 rounded-full ${isCritical ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+          <div className="grid grid-cols-2 border-b border-slate-200 divide-x divide-slate-200 bg-white">
+            <div className={`p-4 flex items-center gap-4 transition-colors ${isCritical ? 'bg-red-50' : ''}`}>
+              <div className={`p-3 rounded-xl shadow-sm ${isCritical ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
                 {isCritical ? <AlertTriangle className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
               </div>
               <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Status</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Aquifer Status</p>
                 <p className={`text-sm font-bold ${isCritical ? 'text-red-700' : 'text-emerald-700'}`}>
-                  {isCritical ? 'Critical Breach' : 'Sustainable'}
+                  {isCritical ? 'Critical Depletion' : 'Sustainable Levels'}
                 </p>
               </div>
             </div>
             
-            <div className="p-4 flex items-center gap-3">
-              <div className="p-2 rounded-full bg-indigo-100 text-indigo-600">
+            <div className="p-4 flex items-center gap-4 bg-white">
+              <div className="p-3 rounded-xl shadow-sm bg-blue-50 text-blue-600">
                 <TrendingDown className="w-5 h-5" />
               </div>
               <div>
-                <p className="text-xs text-slate-500 font-bold uppercase">Max Impact</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Projected Impact</p>
                 <p className="text-sm font-bold text-slate-700">
-                  {maxDrop.toFixed(2)}m <span className="text-slate-400 font-normal">vs baseline</span>
+                  {Math.abs(maxDrop).toFixed(2)}m <span className="text-slate-400 font-normal">drawdown</span>
                 </p>
               </div>
             </div>
@@ -239,58 +248,63 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
           {/* Chart Area */}
           <div className="flex-1 p-6 relative">
             {error && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-                <div className="text-red-500 font-medium flex items-center gap-2 bg-red-50 px-4 py-2 rounded-lg border border-red-100">
-                  <AlertTriangle className="w-5 h-5" /> {error}
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 backdrop-blur-sm">
+                <div className="text-red-600 font-medium flex items-center gap-2 bg-red-50 px-6 py-4 rounded-xl border border-red-100 shadow-xl">
+                  <AlertTriangle className="w-6 h-6" /> {error}
                 </div>
               </div>
             )}
 
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorBase" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#94a3b8" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#94a3b8" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#64748b" stopOpacity={0.1}/>
+                    <stop offset="95%" stopColor="#64748b" stopOpacity={0}/>
                   </linearGradient>
                   <linearGradient id="colorScen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={isCritical ? "#ef4444" : "#3b82f6"} stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor={isCritical ? "#ef4444" : "#3b82f6"} stopOpacity={0}/>
+                    <stop offset="5%" stopColor={isCritical ? "#ef4444" : "#6366f1"} stopOpacity={0.25}/>
+                    <stop offset="95%" stopColor={isCritical ? "#ef4444" : "#6366f1"} stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 
                 <XAxis 
                   dataKey="date" 
                   axisLine={false} 
                   tickLine={false} 
-                  tick={{fill: '#94a3b8', fontSize: 12}} 
-                  dy={10}
+                  tick={{fill: '#94a3b8', fontSize: 12, fontWeight: 500}} 
+                  dy={15}
                 />
                 <YAxis 
                   domain={['auto', 'auto']} 
-                  hide // Hide Y Axis for cleaner look, tooltip handles values
+                  hide 
                 />
                 
                 <Tooltip 
+                  cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
                   content={({ active, payload, label }) => {
                     if (active && payload && payload.length) {
                       const base = payload[0].value as number;
                       const scen = payload[1].value as number;
                       return (
-                        <div className="bg-white p-3 border border-slate-100 shadow-xl rounded-xl text-sm">
-                          <p className="font-bold text-slate-800 mb-2">{payload[0].payload.fullDate}</p>
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-slate-400" />
-                              <span className="text-slate-500">Baseline:</span>
-                              <span className="font-mono font-bold text-slate-700">{base.toFixed(2)}m</span>
+                        <div className="bg-slate-900 p-4 border border-slate-800 shadow-2xl rounded-xl text-xs text-white">
+                          <p className="font-bold text-slate-300 mb-3 text-sm">{payload[0].payload.fullDate}</p>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-6">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 rounded-full bg-slate-500" />
+                                <span className="text-slate-400">Baseline</span>
+                              </div>
+                              <span className="font-mono font-bold">{base.toFixed(2)}m</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <div className={`w-2 h-2 rounded-full ${isCritical ? 'bg-red-500' : 'bg-blue-500'}`} />
-                              <span className={isCritical ? "text-red-600" : "text-blue-600"}>Scenario:</span>
-                              <span className={`font-mono font-bold ${isCritical ? 'text-red-600' : 'text-blue-600'}`}>
+                            <div className="flex items-center justify-between gap-6">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${isCritical ? 'bg-red-500' : 'bg-indigo-500'}`} />
+                                <span className={isCritical ? "text-red-400" : "text-indigo-400"}>Scenario</span>
+                              </div>
+                              <span className={`font-mono font-bold ${isCritical ? 'text-red-400' : 'text-indigo-400'}`}>
                                 {scen.toFixed(2)}m
                               </span>
                             </div>
@@ -302,13 +316,21 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
                   }}
                 />
                 
-                <Legend verticalAlign="top" height={36} iconType="circle" />
+                <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ top: -10 }} />
 
                 <ReferenceLine 
                   y={criticalLevel} 
                   stroke="#ef4444" 
                   strokeDasharray="3 3" 
-                  label={{ value: 'Critical Level', fill: '#ef4444', fontSize: 12, position: 'insideTopRight' }} 
+                  strokeWidth={2}
+                  label={{ 
+                    value: 'CRITICAL LIMIT', 
+                    fill: '#ef4444', 
+                    fontSize: 10, 
+                    fontWeight: 700,
+                    position: 'insideTopRight',
+                    dy: -10 
+                  }} 
                 />
 
                 <Area 
@@ -318,17 +340,17 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
                   strokeWidth={2}
                   fill="url(#colorBase)" 
                   fillOpacity={1}
-                  activeDot={{ r: 4 }}
+                  activeDot={{ r: 4, fill: '#64748b' }}
                 />
                 
                 <Area 
                   type="monotone" 
                   dataKey="Scenario" 
-                  stroke={isCritical ? "#ef4444" : "#3b82f6"} 
+                  stroke={isCritical ? "#ef4444" : "#6366f1"} 
                   strokeWidth={3}
                   fill="url(#colorScen)" 
                   fillOpacity={1}
-                  activeDot={{ r: 6, strokeWidth: 0 }}
+                  activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
                 />
               </AreaChart>
             </ResponsiveContainer>
