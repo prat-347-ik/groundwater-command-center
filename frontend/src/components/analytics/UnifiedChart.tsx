@@ -6,14 +6,13 @@ import { format } from 'date-fns';
 interface UnifiedChartProps {
   history: any[];
   forecast: any[];
-  rainfall?: any[]; // 👈 New Prop
+  rainfall?: any[]; 
   criticalLevel: number;
 }
 
 export default function UnifiedChart({ history, forecast, rainfall = [], criticalLevel }: UnifiedChartProps) {
   
   // 1. Merge all data sources by Date
-  // We create a map where keys are dates (YYYY-MM-DD) to merge efficiently
   const dataMap = new Map();
 
   // Helper to init date entry
@@ -43,17 +42,14 @@ export default function UnifiedChart({ history, forecast, rainfall = [], critica
     entry.forecast = item.predicted_level;
   });
 
-// Process Rainfall
+  // Process Rainfall
   rainfall.forEach(item => {
-    // ❌ WAS: const entry = getEntry(item.date);
-    // ❌ WAS: entry.rainfall = item.mm;
-    
-    // ✅ CORRECT:
     if (item.timestamp && item.amount_mm !== undefined) {
       const entry = getEntry(item.timestamp); 
       entry.rainfall = item.amount_mm;        
     }
   });
+
   // Convert map to sorted array
   const combinedData = Array.from(dataMap.values()).sort((a, b) => 
     new Date(a.date).getTime() - new Date(b.date).getTime()
@@ -87,7 +83,10 @@ export default function UnifiedChart({ history, forecast, rainfall = [], critica
           <Tooltip 
             labelStyle={{ color: '#64748b' }}
             itemStyle={{ fontSize: 14 }}
-            formatter={(value: number | undefined) => value !== undefined ? value.toFixed(2) : 'N/A'}
+            // ✅ FIX: Allow 'any' type to satisfy Recharts strict typing
+            formatter={(value: any) => 
+              (typeof value === 'number') ? value.toFixed(2) : 'N/A'
+            }
           />
           <Legend verticalAlign="top" height={36}/>
 
