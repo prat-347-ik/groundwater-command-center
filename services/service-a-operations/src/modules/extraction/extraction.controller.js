@@ -109,3 +109,24 @@ export const getExtractionHistory = async (req, res, next) => {
     next(error);
   }
 };
+
+// ✅ ADD THIS NEW FUNCTION
+export const getExtractionHistoryByRegion = async (req, res) => {
+  try {
+    const { regionId } = req.params;
+    
+    // Fetch logs for this region, sorted by newest first
+    const logs = await ExtractionLog.find({ region_id: regionId })
+      .sort({ timestamp: -1 })
+      .limit(30); // Limit to last 30 entries for the chart
+
+    res.status(200).json({
+      success: true,
+      count: logs.length,
+      data: logs
+    });
+  } catch (error) {
+    console.error("Error fetching extraction history:", error);
+    res.status(500).json({ success: false, message: 'Server Error' });
+  }
+};
