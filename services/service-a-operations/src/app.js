@@ -30,10 +30,28 @@ const SERVICE_C_URL = process.env.SERVICE_C_URL || 'http://localhost:8100';
 
 app.use(helmet());
 
+const corsOriginEnv = process.env.CORS_ORIGIN || '*';
+const allowedOrigins = corsOriginEnv
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+const isWildcardCors = allowedOrigins.includes('*');
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*', 
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (isWildcardCors || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: !isWildcardCors
 }));
 
 app.use(morgan('dev'));
@@ -103,7 +121,7 @@ app.use('/api/v1/rainfall', async (req, res) => {
   try {
     // Construct target URL (Preserve query params and sub-paths)
     // Example: /api/v1/rainfall/ingest/csv -> http://localhost:8100/api/v1/rainfall/ingest/csv
-    const targetPath = req.url; // path relative to mount point
+    const targetPath = req.path === '/' ? '' : req.path;
     const targetUrl = `${SERVICE_C_URL}/api/v1/rainfall${targetPath}`;
 
     console.log(`[Proxy] 🌧️ Forwarding Rainfall request to ${targetUrl}`);
@@ -112,14 +130,29 @@ app.use('/api/v1/rainfall', async (req, res) => {
       method: req.method,
       url: targetUrl,
       data: req.body,
-      params: req.query
+      params: req.query,
+      timeout: 10000
     });
 
     res.status(response.status).json(response.data);
   } catch (error) {
-    console.error('❌ Rainfall Proxy Error:', error.message);
-    const status = error.response ? error.response.status : 502;
-    res.status(status).json({ message: 'Service C (Climate) unreachable' });
+    const status = error.response?.status || (error.code === 'ECONNREFUSED' ? 503 : 502);
+    const details = error.response?.data || error.message;
+
+    console.error('❌ Rainfall Proxy Error:', {
+      code: error.code,
+      message: error.message,
+      target: `${SERVICE_C_URL}/api/v1/rainfall`,
+      method: req.method,
+      path: req.path,
+      query: req.query,
+      statusFromUpstream: error.response?.status
+    });
+
+    res.status(status).json({
+      message: 'Service C (Climate) unavailable',
+      details
+    });
   }
 });
 

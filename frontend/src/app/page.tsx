@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Activity, Database, AlertTriangle, CloudRain } from 'lucide-react';
 import StatCard from '@/components/dashboard/StatCard';
 import RegionGrid from '@/components/dashboard/RegionGrid';
-import { opsClient } from '@/lib/api';
+import { getApiErrorMessage, opsClient } from '@/lib/api';
 
 export default function Home() {
   // Initial state matches the shape of the 'counts' object
@@ -19,7 +19,7 @@ export default function Home() {
           setStats(res.data.counts);
         }
       })
-      .catch(err => console.error("Stats Error:", err));
+        .catch(err => console.warn("Stats Warning:", getApiErrorMessage(err)));
   }, []);
 
   return (
