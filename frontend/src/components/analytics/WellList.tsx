@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Search, Droplet, AlertTriangle } from 'lucide-react';
-import { opsClient } from '@/lib/api';
+import { getApiErrorMessage, opsClient } from '@/lib/api';
 
 interface Well {
   well_id: string;
@@ -28,7 +28,7 @@ export default function WellList({ regionId }: WellListProps) {
         const list = Array.isArray(res.data) ? res.data : (res.data.data || []);
         setWells(list);
       } catch (err) {
-        console.error("Failed to load wells", err);
+        console.warn("Failed to load wells:", getApiErrorMessage(err));
       } finally {
         setLoading(false);
       }

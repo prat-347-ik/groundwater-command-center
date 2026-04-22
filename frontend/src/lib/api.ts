@@ -3,9 +3,70 @@ import { ExtractionLog } from '@/types'; // Ensure you have this type defined in
 
 // --- Configuration ---
 // These match the ports we defined in your backend services
-const OPS_URL = process.env.NEXT_PUBLIC_OPS_URL || 'http://localhost:4000/api/v1';
-const ANALYTICS_URL = process.env.NEXT_PUBLIC_ANALYTICS_URL || 'http://localhost:8000/api/v1';
-const CLIMATE_URL = process.env.NEXT_PUBLIC_CLIMATE_URL || 'http://localhost:8100/api/v1';
+const toApiV1Base = (value: string) => {
+  const trimmed = value.replace(/\/+$/, '');
+  return trimmed.endsWith('/api/v1') ? trimmed : `${trimmed}/api/v1`;
+};
+
+const resolveDefaultHost = () => {
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}`;
+  }
+
+  return 'http://localhost';
+};
+
+const resolveApiBase = (port: number, ...candidates: Array<string | undefined>) => {
+  const explicit = candidates.find(Boolean);
+  if (explicit) {
+    return toApiV1Base(explicit);
+  }
+
+  return toApiV1Base(`${resolveDefaultHost()}:${port}`);
+};
+
+const OPS_URL = resolveApiBase(
+  4000,
+  process.env.NEXT_PUBLIC_OPS_URL,
+  process.env.NEXT_PUBLIC_API_URL_A
+);
+
+const ANALYTICS_URL = resolveApiBase(
+  8000,
+  process.env.NEXT_PUBLIC_ANALYTICS_URL,
+  process.env.NEXT_PUBLIC_API_URL_B
+);
+
+const CLIMATE_URL = resolveApiBase(
+  8100,
+  process.env.NEXT_PUBLIC_CLIMATE_URL,
+  process.env.NEXT_PUBLIC_API_URL_C
+);
+
+export const getApiErrorMessage = (error: unknown): string => {
+  if (axios.isAxiosError(error)) {
+    const responseMessage =
+      (typeof error.response?.data === 'string' && error.response.data) ||
+      (error.response?.data as any)?.message ||
+      (error.response?.data as any)?.error;
+
+    if (responseMessage) {
+      return responseMessage;
+    }
+
+    if (!error.response) {
+      return 'Service unreachable. Please verify backend services are running.';
+    }
+
+    return `Request failed with status ${error.response.status}.`;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return 'Unexpected error occurred.';
+};
 
 // --- 1. Service A: Operations (Node.js) ---
 export const opsClient = axios.create({
@@ -28,7 +89,19 @@ export const climateClient = axios.create({
 // --- Unified Error Handling ---
 // This ensures your UI doesn't crash if a microservice is down
 const handleApiError = (error: any) => {
-  console.error("API Error:", error.response?.data || error.message);
+  if (axios.isAxiosError(error) && !error.response) {
+    // Browser couldn't reach the service (down/unavailable/CORS/network interruption)
+    console.warn("API Network Warning:", {
+      message: error.message,
+      code: error.code,
+      method: error.config?.method,
+      url: error.config?.url,
+      baseURL: error.config?.baseURL,
+    });
+    return Promise.reject(error);
+  }
+
+  console.error("API Error:", getApiErrorMessage(error));
   return Promise.reject(error);
 };
 

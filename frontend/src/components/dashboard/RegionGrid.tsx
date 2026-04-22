@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MapPin, ArrowRight, Activity } from 'lucide-react';
-import { opsClient } from '@/lib/api';
+import { getApiErrorMessage, opsClient } from '@/lib/api';
 
 interface Region {
   _id: string;        // MongoDB Internal ID (Ignore for routing)
@@ -27,7 +27,7 @@ export default function RegionGrid() {
         const list = Array.isArray(res.data) ? res.data : (res.data.data || []);
         setRegions(list);
       } catch (err) {
-        console.error("Failed to load regions", err);
+        console.warn("Failed to load regions:", getApiErrorMessage(err));
       } finally {
         setLoading(false);
       }

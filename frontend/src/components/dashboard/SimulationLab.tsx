@@ -21,7 +21,7 @@ import {
   TrendingUp,
   Activity
 } from 'lucide-react';
-import { analyticsClient } from '@/lib/api';
+import { analyticsClient, getApiErrorMessage } from '@/lib/api';
 import { format, addDays } from 'date-fns';
 
 interface Forecast {
@@ -87,7 +87,7 @@ export default function SimulationLab({ regionId, regionName, criticalLevel }: S
       setScenario(scenRes.data.data);
       setHasRun(true);
     } catch (err: any) {
-      console.error("Simulation Error:", err);
+      console.warn("Simulation Warning:", getApiErrorMessage(err));
       setError("Simulation service unavailable.");
     } finally {
       setLoading(false);

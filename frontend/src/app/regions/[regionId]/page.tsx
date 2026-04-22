@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Droplets, MapPin, AlertCircle } from 'lucide-react';
-import { opsClient, analyticsClient } from '@/lib/api';
+import { opsClient, getApiErrorMessage } from '@/lib/api';
 import UnifiedChart from '@/components/analytics/UnifiedChart';
 import WellList from '@/components/analytics/WellList';
 
@@ -27,17 +27,17 @@ export default function RegionAnalyticsPage() {
         const [regionRes, historyRes, forecastRes, rainRes] = await Promise.all([
           opsClient.get(`/regions/${regionId}`),
           opsClient.get(`/water-readings?region_id=${regionId}&limit=30`),
-          analyticsClient.get(`/forecasts/${regionId}`),
+          opsClient.get(`/forecasts/${regionId}`),
           opsClient.get(`/rainfall?region_id=${regionId}&limit=30`)
         ]);
 
         setRegion(regionRes.data.data || regionRes.data);
         setHistory(historyRes.data.data || []);
-        setForecast(forecastRes.data || []);
+        setForecast(forecastRes.data.data || []);
         setRainfall(rainRes.data.data || []);
 
       } catch (err) {
-        console.error("Failed to load region analytics", err);
+        console.warn("Failed to load region analytics:", getApiErrorMessage(err));
       } finally {
         setLoading(false);
       }

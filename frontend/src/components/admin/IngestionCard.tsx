@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { UploadCloud, CheckCircle, AlertTriangle, FileUp } from 'lucide-react';
-import { opsClient, climateClient } from '@/lib/api';
+import { opsClient, climateClient, getApiErrorMessage } from '@/lib/api';
 
 interface IngestionCardProps {
   title: string;
@@ -34,9 +34,9 @@ export default function IngestionCard({ title, description, service, endpoint, a
       setMessage(res.data.message || 'Ingestion started successfully');
       setFile(null); // Reset
     } catch (err: any) {
-      console.error("Upload Error", err);
+      console.warn("Upload warning:", getApiErrorMessage(err));
       setStatus('error');
-      setMessage(err.response?.data?.message || err.message || "Upload Failed");
+      setMessage(getApiErrorMessage(err));
     }
   };
 

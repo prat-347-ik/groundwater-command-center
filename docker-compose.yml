@@ -9,6 +9,7 @@ services:
       PORT: 4000
       NODE_ENV: ${NODE_ENV}
       MONGO_URI: ${MONGO_ATLAS_URI}
+      CORS_ORIGIN: ${ALLOWED_ORIGINS:-http://localhost:3000}
       # 👇 FIX: Point to the internal Docker container names, not localhost
       SERVICE_B_URL: "http://service_b_analytics:8000"
       SERVICE_C_URL: "http://service_c_climate:8100"
@@ -49,10 +50,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Browser access (Use localhost if running on your machine)
-      NEXT_PUBLIC_API_URL_A: "http://localhost:4000"
-      NEXT_PUBLIC_API_URL_B: "http://localhost:8000"
-      NEXT_PUBLIC_API_URL_C: "http://localhost:8100"
+      # Browser access (defaults to localhost; set HOST_IP for remote PCs)
+      NEXT_PUBLIC_API_URL_A: "http://${HOST_IP:-localhost}:4000"
+      NEXT_PUBLIC_API_URL_B: "http://${HOST_IP:-localhost}:8000"
+      NEXT_PUBLIC_API_URL_C: "http://${HOST_IP:-localhost}:8100"
     networks:
       - groundwater_net
 

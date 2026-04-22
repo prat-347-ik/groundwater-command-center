@@ -152,6 +152,45 @@ docker-compose up --build
 * **Analytics API (Service B):** `http://localhost:8000`
 * **Climate API (Service C):** `http://localhost:8100`
 
+### Remote Access From Another PC
+
+1. **Set host IP and CORS origins in root `.env`:**
+
+```env
+HOST_IP=192.168.1.50
+ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.50:3000
+```
+
+2. **Open firewall inbound ports on the host machine:**
+	* `3000` (Frontend)
+	* `4000` (Service A)
+	* `8000` (Service B)
+	* `8100` (Service C)
+
+3. **Rebuild and start:**
+
+```bash
+docker compose up --build -d
+```
+
+4. **Access from remote PC on same LAN:**
+
+```text
+http://<HOST_IP>:3000
+```
+
+5. **Internet access options:**
+	* Router port-forwarding for `3000` (and API ports if direct API calls are required)
+	* Tunnel for quick testing:
+
+```bash
+ngrok http 3000
+```
+
+Notes:
+* Frontend API URLs are automatically generated from `HOST_IP` by `docker-compose.yml`.
+* Service A CORS uses `ALLOWED_ORIGINS` and supports a comma-separated allowlist.
+
 
 
 ---
