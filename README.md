@@ -154,42 +154,55 @@ docker-compose up --build
 
 ### Remote Access From Another PC
 
-1. **Set host IP and CORS origins in root `.env`:**
+1. **Find your host machine IP (Windows):**
+
+```powershell
+ipconfig
+```
+
+Use your active adapter IPv4 address (for example `192.168.1.50`).
+
+2. **Set host IP and CORS origins in root `.env`:**
 
 ```env
 HOST_IP=192.168.1.50
 ALLOWED_ORIGINS=http://localhost:3000,http://192.168.1.50:3000
 ```
 
-2. **Open firewall inbound ports on the host machine:**
-	* `3000` (Frontend)
-	* `4000` (Service A)
-	* `8000` (Service B)
-	* `8100` (Service C)
+3. **Open firewall inbound ports on the host machine (Windows):**
 
-3. **Rebuild and start:**
+```powershell
+New-NetFirewallRule -DisplayName "Groundwater Frontend 3000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000
+New-NetFirewallRule -DisplayName "Groundwater Service A 4000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4000
+New-NetFirewallRule -DisplayName "Groundwater Service B 8000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8000
+New-NetFirewallRule -DisplayName "Groundwater Service C 8100" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8100
+```
+
+4. **Rebuild and start:**
 
 ```bash
 docker compose up --build -d
 ```
 
-4. **Access from remote PC on same LAN:**
+5. **Access from a remote PC on the same LAN:**
 
 ```text
 http://<HOST_IP>:3000
 ```
 
-5. **Internet access options:**
-	* Router port-forwarding for `3000` (and API ports if direct API calls are required)
-	* Tunnel for quick testing:
+6. **Remote access over the internet (choose one):**
+* Router port-forwarding for `3000` (and backend ports if direct API access is required).
+* Tunneling for testing (no router changes):
 
 ```bash
 ngrok http 3000
 ```
 
-Notes:
-* Frontend API URLs are automatically generated from `HOST_IP` by `docker-compose.yml`.
-* Service A CORS uses `ALLOWED_ORIGINS` and supports a comma-separated allowlist.
+7. **Security and deployment notes:**
+* Frontend API URLs are generated from `HOST_IP` by `docker-compose.yml`.
+* Service A CORS uses `ALLOWED_ORIGINS` (comma-separated allowlist).
+* Ensure `MONGO_ATLAS_URI` is valid and reachable from Docker containers.
+* Use production mode for remote use. The provided frontend Dockerfile already runs a production build (`next build`) and production server (`next start` via standalone `server.js`).
 
 
 

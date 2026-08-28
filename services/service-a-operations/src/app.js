@@ -19,8 +19,8 @@ const app = express();
 // ==========================================
 // ⚙️ Configuration
 // ==========================================
-// Service B: Analytics Engine (Port 8200)
-const SERVICE_B_URL = process.env.SERVICE_B_URL || 'http://localhost:8200';
+// Service B: Analytics Engine (Port 8000)
+const SERVICE_B_URL = process.env.SERVICE_B_URL || 'http://localhost:8000';
 // Service C: Climate Intelligence (Port 8100)
 const SERVICE_C_URL = process.env.SERVICE_C_URL || 'http://localhost:8100';
 
