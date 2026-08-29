@@ -49,6 +49,13 @@ class GroundwaterStreamAggregator:
             })
         return results
 
+def aggregate_daily_groundwater(cleaned_readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Batch convenience wrapper using GroundwaterStreamAggregator."""
+    aggregator = GroundwaterStreamAggregator()
+    for row in cleaned_readings:
+        aggregator.consume(row)
+    return aggregator.get_results()
+
 # --- Existing Function (Kept for Rainfall or small batches) ---
 def aggregate_daily_rainfall(cleaned_rainfall: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """

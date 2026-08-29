@@ -19,6 +19,9 @@ app = FastAPI(title="Service B - Analytics Worker", version="1.0.0")
 class PipelineRequest(BaseModel):
     date: str = None
 
+class TrainingRequest(BaseModel):
+    model_type: str = "all"
+
 # --- UPDATED: Async Wrapper for Async Jobs (ETL) ---
 async def run_async_job_safe(job_func, job_name, *args):
     """Wrapper for ASYNC functions (like daily_summary)"""
@@ -67,11 +70,11 @@ async def trigger_daily_summary(request: PipelineRequest, background_tasks: Back
     return {"status": "queued", "job": "daily_summary", "target_date": target_date}
 
 @app.post("/jobs/train")
-def trigger_training(background_tasks: BackgroundTasks):
+def trigger_training(payload: TrainingRequest, background_tasks: BackgroundTasks):
     """Step 2: Training (Sync - CPU Bound)"""
-    logger.info("Received trigger for Model Training")
-    background_tasks.add_task(run_sync_job_safe, run_training_pipeline, "Training")
-    return {"status": "queued", "job": "training"}
+    logger.info(f"Received trigger for Model Training. Model type requested: {payload.model_type}")
+    background_tasks.add_task(run_sync_job_safe, run_training_pipeline, "Training", payload.model_type)
+    return {"status": "queued", "job": "training", "model_type": payload.model_type}
 
 @app.post("/jobs/promote")
 def trigger_promotion(background_tasks: BackgroundTasks):

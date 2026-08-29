@@ -1,9 +1,8 @@
 import os
 import json
 import logging
-import shutil
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Configure Logger
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,86 +26,121 @@ def load_json_file(filepath: str, default: Any = None) -> Any:
     except json.JSONDecodeError as e:
         raise ValueError(f"Corrupted JSON in {filepath}: {e}")
 
-def promote_models():
+def promote_models(registry_path: str = REGISTRY_PATH, evaluation_path: str = EVALUATION_PATH) -> Dict[str, Any]:
     """
-    Evaluates candidates from the latest run and promotes them to the registry
-    if they outperform the baseline.
+    Evaluates candidate models from the latest training run and promotes the best candidate
+    per region into the registry if it outperforms the baseline (and current active model).
     """
     logger.info("🛡️ Starting Model Promotion Gate...")
 
     # 1. Load Current Registry
-    # We use a Dict for O(1) access and to enforce "One active model per region"
-    current_registry_list = load_json_file(REGISTRY_PATH, default=[])
-    
-    # Validation: Fail fast if registry is malformed
-    if not isinstance(current_registry_list, list):
-        raise ValueError(f"Registry format error: Expected list, got {type(current_registry_list)}")
+    current_registry: List[Dict[str, Any]] = load_json_file(registry_path, default=[])
+    if not isinstance(current_registry, list):
+        raise ValueError(f"Registry format error: Expected list, got {type(current_registry)}")
         
-    registry_map = {entry['region_id']: entry for entry in current_registry_list}
-    logger.info(f"📋 Current Registry: {len(registry_map)} active models.")
+    # Index current active models by region_id
+    active_by_region: Dict[str, Dict[str, Any]] = {}
+    for entry in current_registry:
+        if entry.get("status") in ("active", "prod"):
+            active_by_region[entry["region_id"]] = entry
+
+    logger.info(f"📋 Current Registry contains {len(active_by_region)} active models across {len(current_registry)} total entries.")
 
     # 2. Load Evaluation Candidates
     try:
-        candidates = load_json_file(EVALUATION_PATH)
+        candidates: List[Dict[str, Any]] = load_json_file(evaluation_path)
     except FileNotFoundError:
         logger.warning("⚠️ No evaluation summary found. Skipping promotion.")
-        return
+        return {"promoted": 0, "rejected": 0, "active_count": len(active_by_region)}
+
+    if not candidates:
+        logger.warning("⚠️ Evaluation summary is empty. No candidates to promote.")
+        return {"promoted": 0, "rejected": 0, "active_count": len(active_by_region)}
+
+    # 3. Group candidates by region and find the best candidate per region
+    candidates_by_region: Dict[str, List[Dict[str, Any]]] = {}
+    for c in candidates:
+        rid = c.get("region_id")
+        if rid:
+            candidates_by_region.setdefault(rid, []).append(c)
 
     promoted_count = 0
     rejected_count = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
 
-    # 3. Evaluate Candidates
-    for candidate in candidates:
-        region_id = candidate['region_id']
-        mae = candidate['mae']
-        baseline = candidate['baseline_mae']
-        
-        # LOGIC: Gated Promotion
-        # Only promote if Model Error < Baseline Error
-        if mae < baseline:
-            logger.info(f"✅ Promoting {region_id}: MAE {mae} < Baseline {baseline}")
+    # Create working copy of registry
+    updated_registry = list(current_registry)
+
+    for region_id, region_candidates in candidates_by_region.items():
+        # Sort candidates by MAE ascending
+        best_candidate = min(region_candidates, key=lambda x: x.get("metrics", {}).get("mae", 999.0))
+        candidate_mae = best_candidate.get("metrics", {}).get("mae", 999.0)
+        baseline_mae = best_candidate.get("metrics", {}).get("baseline_mae", 999.0)
+        model_type = best_candidate.get("model_type", "unknown")
+
+        current_active = active_by_region.get(region_id)
+        current_active_mae = (
+            current_active.get("metrics", {}).get("mae", 999.0)
+            if current_active and current_active.get("metrics")
+            else baseline_mae
+        )
+
+        # Promotion Gate Condition:
+        # Candidate MAE must be strictly less than baseline MAE AND <= current active MAE
+        is_promotable = (candidate_mae < baseline_mae) and (candidate_mae <= current_active_mae)
+
+        if is_promotable:
+            logger.info(
+                f"✅ Promoting {region_id} [{model_type}]: "
+                f"MAE {candidate_mae:.4f} < Baseline {baseline_mae:.4f} (Prev Active: {current_active_mae:.4f})"
+            )
             
-            # Construct Registry Entry
-            # We preserve specific fields required by predictor.py and audit trails
-            new_entry = {
+            # Archive previous active entry for this region
+            for entry in updated_registry:
+                if entry.get("region_id") == region_id and entry.get("status") in ("active", "prod"):
+                    entry["status"] = "archived"
+
+            # Construct standardized registry record
+            promoted_entry = {
                 "region_id": region_id,
-                "artifact_path": candidate['artifact_path'],
-                "metadata_path": candidate.get('metadata_path', ''), # robust get
-                "promoted_at": datetime.now(timezone.utc).isoformat(),
-                "metrics": {
-                    "mae": mae,
-                    "rmse": candidate.get('rmse'),
-                    "baseline_mae": baseline
-                },
-                "status": "prod"
+                "model_type": model_type,
+                "version": best_candidate.get("version", "v1.0"),
+                "status": "active",
+                "artifact_path": best_candidate["artifact_path"],
+                "metadata_path": best_candidate.get("metadata_path"),
+                "registered_at": best_candidate.get("registered_at", now_iso),
+                "promoted_at": now_iso,
+                "metrics": best_candidate.get("metrics")
             }
             
-            # Update/Insert (Overwrites previous model for this region)
-            registry_map[region_id] = new_entry
+            updated_registry.append(promoted_entry)
             promoted_count += 1
         else:
-            logger.warning(f"⛔ Rejecting {region_id}: MAE {mae} >= Baseline {baseline}")
+            logger.warning(
+                f"⛔ Rejecting {region_id} [{model_type}]: "
+                f"MAE {candidate_mae:.4f} >= Baseline {baseline_mae:.4f} or higher than active {current_active_mae:.4f}"
+            )
             rejected_count += 1
 
     # 4. Atomic Write Strategy
     if promoted_count > 0:
-        # Convert map back to list (stable sorting for readability)
-        new_registry_list = sorted(registry_map.values(), key=lambda x: x['region_id'])
-        
-        # Write to temp file first
-        tmp_path = REGISTRY_PATH + ".tmp"
+        tmp_path = registry_path + ".tmp"
         with open(tmp_path, 'w') as f:
-            json.dump(new_registry_list, f, indent=2)
+            json.dump(updated_registry, f, indent=2)
             
-        # Atomic Swap
-        os.replace(tmp_path, REGISTRY_PATH)
-        logger.info(f"🚀 Registry updated. Promoted: {promoted_count}, Rejected: {rejected_count}, Total Active: {len(new_registry_list)}")
+        os.replace(tmp_path, registry_path)
+        logger.info(
+            f"🚀 Registry updated atomically. Promoted: {promoted_count}, "
+            f"Rejected: {rejected_count}, Total Entries: {len(updated_registry)}"
+        )
     else:
-        logger.info("💤 No models promoted. Registry remains unchanged.")
+        logger.info("💤 No models met promotion criteria. Registry remains unchanged.")
+
+    return {
+        "promoted": promoted_count,
+        "rejected": rejected_count,
+        "total_entries": len(updated_registry)
+    }
 
 if __name__ == "__main__":
-    try:
-        promote_models()
-    except Exception as e:
-        logger.exception(f"❌ Promotion Failed: {e}")
-        exit(1)
+    promote_models()
