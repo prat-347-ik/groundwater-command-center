@@ -13,12 +13,13 @@ async def lifespan(app: FastAPI):
     Lifecycle manager: Connects to DB on startup, closes on shutdown.
     """
     db.connect()
-    # Ensure indexes
-    db.get_rainfall_collection().create_index([("region_id", 1), ("timestamp", -1)])
-    # 🆕 Weather Indexes
-    db.get_weather_collection().create_index([("region_id", 1), ("timestamp", -1)])
-    # <--- 🆕 Satellite Indexes
-    db.get_satellite_collection().create_index([("region_id", 1), ("timestamp", -1)]) # <--- 🆕 Index
+    if db.db is not None:
+        try:
+            db.get_rainfall_collection().create_index([("region_id", 1), ("timestamp", -1)])
+            db.get_weather_collection().create_index([("region_id", 1), ("timestamp", -1)])
+            db.get_satellite_collection().create_index([("region_id", 1), ("timestamp", -1)])
+        except Exception as e:
+            print(f"⚠️ Index creation warning: {e}")
     yield
     db.close()
 

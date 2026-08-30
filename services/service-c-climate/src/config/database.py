@@ -14,9 +14,12 @@ class Database:
 
     def connect(self):
         """Establishes connection to MongoDB."""
-        self.client = MongoClient(MONGO_URI)
-        self.db = self.client[DB_NAME]
-        print(f"✅ [Service C] Connected to MongoDB: {DB_NAME}")
+        try:
+            self.client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+            self.db = self.client[DB_NAME]
+            print(f"✅ [Service C] Connected to MongoDB: {DB_NAME}")
+        except Exception as e:
+            print(f"⚠️ [Service C] MongoDB Connection Warning: {e}")
 
     def get_rainfall_collection(self):
         """Returns the specific collection for Rainfall data."""
