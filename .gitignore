@@ -35,3 +35,6 @@ models/v1/archive/
 # 5. IGNORE pytest cache files
 .pytest_cache/
 scripts/*/__pycache__/
+
+# 6. IGNORE Agent workspace config
+.gemini/
