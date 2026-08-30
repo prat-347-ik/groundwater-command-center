@@ -1,13 +1,36 @@
 import sys
 from datetime import datetime
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware  # 👈 1. Import this
 from src.utils.logger import setup_logger
 from src.jobs.daily_summary import run_daily_pipeline
+from src.api.forecasts import router as forecast_router
 
 logger = setup_logger()
 
+# --- 1. API CONFIGURATION (Accessed by Uvicorn) ---
+app = FastAPI(title="Groundwater Analytics Engine", version="2.0")
+
+# 2. Add CORS Middleware (Allow Frontend Access)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, change this to ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Register the Forecasts Router (Connects the Brain to the API)
+app.include_router(forecast_router)
+
+@app.get("/health")
+def health_check():
+    """Health check for the Analytics Service"""
+    return {"status": "active", "service": "Service B (Analytics)", "model_type": "LSTM/RF"}
+
 def main():
     """
-    Main Entry Point.
+    Main Entry Point for Background Jobs.
     Usage: python main.py [job_name] [optional: YYYY-MM-DD]
     """
     if len(sys.argv) < 2:
@@ -26,7 +49,7 @@ def main():
 
     try:
         if job_name == "daily_summary":
-            # FIXED: Passing the required argument
+            # Running the Pipeline  
             run_daily_pipeline(target_date_str)
         else:
             logger.warning(f"Job {job_name} not recognized.")

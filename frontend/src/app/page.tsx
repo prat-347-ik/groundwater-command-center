@@ -1,92 +1,74 @@
-// src/app/page.tsx
-'use client';
+"use client";
 
 import { useEffect, useState } from 'react';
-import { fetchRegions, fetchHistoricalData, fetchForecasts } from '@/lib/api';
-import { Region, WaterReading, Forecast } from '@/types';
-import RegionSelect from '@/components/dashboard/RegionSelect';
-import MainChart from '@/components/dashboard/MainChart';
-import PipelineStatus from '@/components/dashboard/PipelineStatus';
+import { Activity, Database, AlertTriangle, CloudRain } from 'lucide-react';
+import StatCard from '@/components/dashboard/StatCard';
+import RegionGrid from '@/components/dashboard/RegionGrid';
+import { getApiErrorMessage, opsClient } from '@/lib/api';
 
-export default function DashboardPage() {
-  const [regions, setRegions] = useState<Region[]>([]);
-  const [selectedRegionId, setSelectedRegionId] = useState<string>('');
-  
-  const [history, setHistory] = useState<WaterReading[]>([]);
-  const [forecasts, setForecasts] = useState<Forecast[]>([]);
-  
-  // ✨ New State: Toggle this to force a re-fetch
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
+export default function Home() {
+  // Initial state matches the shape of the 'counts' object
+  const [stats, setStats] = useState({ regions: 0, wells: 0, readings: 0 });
 
-  // 1. Load Regions on Mount
   useEffect(() => {
-    fetchRegions().then((res) => {
-      if (res.success && res.data.length > 0) {
-        setRegions(res.data);
-        setSelectedRegionId(res.data[0].region_id);
-      }
-    });
+    // Fetch system-wide counts from Service A
+    opsClient.get('/stats/counts')
+      .then(res => {
+        // ✅ FIX: Access 'res.data.counts' instead of 'res.data'
+        if (res.data.counts) {
+          setStats(res.data.counts);
+        }
+      })
+        .catch(err => console.warn("Stats Warning:", getApiErrorMessage(err)));
   }, []);
 
-  // 2. Load Data (Runs when Region changes OR refreshTrigger updates)
-  useEffect(() => {
-    if (!selectedRegionId) return;
-
-    console.log("🔄 Refreshing dashboard data...");
-
-    Promise.all([
-      fetchHistoricalData(selectedRegionId),
-      fetchForecasts(selectedRegionId)
-    ]).then(([histRes, fcRes]) => {
-      setHistory(histRes.data || []);
-      setForecasts(fcRes.data || []);
-    });
-    
-  }, [selectedRegionId, refreshTrigger]); // <--- Added refreshTrigger here
-
-  const currentRegion = regions.find(r => r.region_id === selectedRegionId);
-
   return (
-    <main className="min-h-screen bg-slate-50 p-6 md:p-12">
+    <main className="min-h-screen bg-slate-50 p-8">
       <div className="max-w-7xl mx-auto space-y-8">
         
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">Groundwater Command Center</h1>
-            <p className="text-slate-500 mt-1">Real-time aquifer monitoring & predictive analytics</p>
-          </div>
-          {/* ✨ Pass the refresh callback */}
-          <PipelineStatus onSuccess={() => setRefreshTrigger(prev => prev + 1)} />
-        </header>
+        {/* 1. Header Section */}
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Command Center</h1>
+          <p className="text-slate-500 mt-1">Groundwater Monitoring & Prediction System</p>
+        </div>
 
-        <section className="bg-white p-4 rounded-lg shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-6 items-start sm:items-center">
-          <RegionSelect 
-            regions={regions} 
-            selectedId={selectedRegionId} 
-            onSelect={setSelectedRegionId} 
+        {/* 2. Vital Signs Row */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard 
+            title="Monitored Regions" 
+            value={stats.regions} 
+            icon={Activity} 
+            color="blue"
           />
-          
-          {currentRegion && (
-             <div className="flex gap-6 text-sm">
-               <div>
-                 <span className="block text-slate-500 text-xs uppercase font-semibold">Region ID</span>
-                 <span className="font-mono text-slate-700">{currentRegion.region_id}</span>
-               </div>
-               <div>
-                 <span className="block text-slate-500 text-xs uppercase font-semibold">Critical Level</span>
-                 <span className="font-mono text-red-600 font-bold">{currentRegion.critical_level}m</span>
-               </div>
-             </div>
-          )}
-        </section>
+          <StatCard 
+            title="Active Wells" 
+            value={stats.wells} 
+            icon={Database} 
+            color="green" 
+          />
+          <StatCard 
+            title="Total Data Points" 
+            value={stats.readings?.toLocaleString() || 0} /* Added optional chaining just in case */
+            icon={CloudRain} 
+            color="amber"
+          />
+          <StatCard 
+            title="Critical Alerts" 
+            value="0" 
+            icon={AlertTriangle} 
+            color="red"
+            trend="System Nominal" 
+          />
+        </div>
 
-        <section>
-          <MainChart 
-            history={history} 
-            forecasts={forecasts} 
-            criticalLevel={currentRegion?.critical_level || 0} 
-          />
-        </section>
+        {/* 3. Main Content: Region Grid */}
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Activity className="h-5 w-5 text-blue-600" />
+            Live Monitoring Grid
+          </h2>
+          <RegionGrid />
+        </div>
 
       </div>
     </main>

@@ -28,14 +28,14 @@ This document serves as the **Single Source of Truth** for network ports used in
 
 ## 🟪 Frontend — Command Center Dashboard
 **Type:** SPA (React + Vite)  
-**Port:** `5173`  
+**Port:** `3000`  
 **Purpose:** User interface for visualization and decision support.  
 **Access:**
-- Local: `http://localhost:5173`
+- Local: `http://localhost:3000`
 
 ## 🟨 Service C — Climate / Environmental (Future)
 **Type:** External Integration Service (Python + FastAPI)  
-**Port:** `5002` (Reserved)  
+**Port:** `8100` (Reserved)  
 **Purpose:** Dedicated service for fetching satellite data and 3rd party climate APIs.
 
 ---
@@ -44,11 +44,11 @@ This document serves as the **Single Source of Truth** for network ports used in
 
 | Component | Port | Protocol | Status | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Frontend** | `5173` | HTTP | ✅ Active | Default Vite Server |
+| **Frontend** | `3000` | HTTP | ✅ Active | Default Vite Server |
 | **Service A** | `4000` | HTTP | ✅ Active | Operational API |
 | **Service B** | — | — | ✅ Active | Batch Job (No Port) |
-| **Service B API**| `5001` | HTTP | 🔒 Reserved | For future ML inference |
-| **Service C** | `5002` | HTTP | 🔒 Reserved | For future Climate service |
+| **Service B API**| `8000` | HTTP | 🔒 Reserved | For future ML inference |
+| **Service C** | `8100` | HTTP | 🔒 Reserved | For future Climate service |
 | **MongoDB** | `27017` | TCP | ✅ Active | Local Development |
 
 ---

@@ -1,0 +1,42 @@
+import os
+from pymongo import MongoClient
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+DB_NAME = os.getenv("DB_NAME", "test")
+
+class Database:
+    client: MongoClient = None
+    db = None
+
+    def connect(self):
+        """Establishes connection to MongoDB."""
+        try:
+            self.client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=2000)
+            self.db = self.client[DB_NAME]
+            print(f"✅ [Service C] Connected to MongoDB: {DB_NAME}")
+        except Exception as e:
+            print(f"⚠️ [Service C] MongoDB Connection Warning: {e}")
+
+    def get_rainfall_collection(self):
+        """Returns the specific collection for Rainfall data."""
+        return self.db["rainfall"]
+    
+    def get_weather_collection(self):
+        """Returns the specific collection for Weather data."""
+        return self.db["weather"]
+    
+    def get_satellite_collection(self):
+        if self.db is None: self.connect()
+        return self.db.satellite_data
+
+    def close(self):
+        """Closes the connection."""
+        if self.client:
+            self.client.close()
+
+# Singleton Instance
+db = Database()

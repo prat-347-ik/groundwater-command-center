@@ -1,12 +1,15 @@
 import Region from '../../models/Region.model.js';
-
 // @desc    Register a new groundwater monitoring region
 // @route   POST /api/v1/regions
 export const createRegion = async (req, res, next) => {
   try {
-    const { name, state, critical_level } = req.body;
+    // 1. Destructure new fields
+    const { 
+      name, state, critical_level, 
+      soil_type, aquifer_depth, permeability_index 
+    } = req.body;
 
-    // 1. Strict Validation
+    // 2. Strict Validation
     if (!name || !state || critical_level === undefined) {
       const error = new Error('Please provide name, state, and critical_level');
       error.status = 400;
@@ -19,20 +22,23 @@ export const createRegion = async (req, res, next) => {
       throw error;
     }
 
-    // 2. Check for Duplicates (Name + State combination)
+    // 3. Check for Duplicates
     const existingRegion = await Region.findOne({ name, state });
     if (existingRegion) {
       const error = new Error(`Region '${name}' already exists in state '${state}'`);
-      error.status = 409; // Conflict
+      error.status = 409; 
       throw error;
     }
 
-    // 3. Create & Save
+    // 4. Create & Save (Pass new fields, defaults will handle missing ones)
     const region = await Region.create({
       name,
       state,
       critical_level,
-      is_active: true // New regions are active by default
+      soil_type,           // 🆕
+      aquifer_depth,       // 🆕
+      permeability_index,  // 🆕
+      is_active: true
     });
 
     res.status(201).json({
@@ -45,6 +51,46 @@ export const createRegion = async (req, res, next) => {
   }
 };
 
+
+// @desc    Update region details
+// @route   PUT /api/v1/regions/:id
+export const updateRegion = async (req, res, next) => {
+  try {
+    const { 
+      name, critical_level, 
+      soil_type, aquifer_depth, permeability_index 
+    } = req.body;
+
+    // Build update object
+    const updateFields = {};
+    if (name) updateFields.name = name;
+    if (critical_level !== undefined) updateFields.critical_level = critical_level;
+    
+    // 🆕 Allow updating geological data
+    if (soil_type) updateFields.soil_type = soil_type;
+    if (aquifer_depth !== undefined) updateFields.aquifer_depth = aquifer_depth;
+    if (permeability_index !== undefined) updateFields.permeability_index = permeability_index;
+
+    const region = await Region.findOneAndUpdate(
+      { region_id: req.params.id },
+      { $set: updateFields },
+      { new: true, runValidators: true }
+    );
+
+    if (!region) {
+      const error = new Error(`Region not found with ID: ${req.params.id}`);
+      error.status = 404;
+      throw error;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: region
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 // @desc    Get single region by UUID
 // @route   GET /api/v1/regions/:id
@@ -68,37 +114,6 @@ export const getRegionById = async (req, res, next) => {
   }
 };
 
-// @desc    Update region thresholds
-// @route   PUT /api/v1/regions/:id
-export const updateRegion = async (req, res, next) => {
-  try {
-    const { name, critical_level } = req.body;
-
-    // We only allow updating metadata, not the ID
-    const updateFields = {};
-    if (name) updateFields.name = name;
-    if (critical_level !== undefined) updateFields.critical_level = critical_level;
-
-    const region = await Region.findOneAndUpdate(
-      { region_id: req.params.id },
-      { $set: updateFields },
-      { new: true, runValidators: true } // Return updated doc & validate
-    );
-
-    if (!region) {
-      const error = new Error(`Region not found with ID: ${req.params.id}`);
-      error.status = 404;
-      throw error;
-    }
-
-    res.status(200).json({
-      success: true,
-      data: region
-    });
-  } catch (error) {
-    next(error);
-  }
-};
 
 // @desc    Get all regions (Modified to support showing inactive)
 // @route   GET /api/v1/regions?all=true

@@ -1,34 +1,39 @@
-// src/types/index.ts
-
+// --- Region (Service A) ---
 export interface Region {
-  _id: string;
-  region_id: string;      // e.g., "region-001"
-  name: string;           // e.g., "California Central Valley"
-  state: string;          // e.g., "California"
-  critical_level: number; // Threshold for alerts
-  // coordinates: { ... }  <-- REMOVED: Not provided by Service A
+  region_id: string;
+  name: string;
+  state: string;
+  critical_water_level_m: number;
+  aquifer_area_m2: number;
+  specific_yield: number;
   is_active: boolean;
 }
 
+// --- Forecast (Service B) ---
+export interface Forecast {
+  region_id: string;
+  forecast_date: string;
+  predicted_level: number;
+  horizon_step: number;
+  scenario_extraction: number; // For the "What-If" simulator
+  model_version: string;
+}
+
+// --- Water Reading (Service A) ---
 export interface WaterReading {
-  _id: string;
+  _id?: string;
   region_id: string;
   well_id: string;
-  timestamp: string;      // ISO Date String
-  water_level: number;    // Depth in meters
+  timestamp: string;
+  water_level: number;
+  is_suspicious: boolean;
+  anomaly_reason?: string;
 }
 
-export interface Forecast {
-  _id: string;
+// --- Extraction Log (Service A) ---
+export interface ExtractionLog {
   region_id: string;
-  forecast_date: string;  // ISO Date String
-  predicted_level: number;
-  horizon_step: number;   // 1-7 days ahead
-}
-
-// Generic response wrapper for Service A
-export interface ApiResponse<T> {
-  success: boolean;
-  count?: number;
-  data: T;
+  volume_liters: number;
+  usage_type: string;
+  timestamp: string;
 }
