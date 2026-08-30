@@ -1,145 +1,55 @@
-# 🌊 Groundwater Prediction Command Center
+# 🌊 Groundwater Management Command Center
 
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016%20%7C%20React%2019-black?logo=next.js)](https://nextjs.org/)
-[![Node.js & Express](https://img.shields.io/badge/Service%20A-Node.js%20%7C%20Express-339933?logo=node.js)](https://nodejs.org/)
-[![Python & FastAPI](https://img.shields.io/badge/Service%20B%20%26%20C-Python%203.10+%20%7C%20FastAPI-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
-[![Machine Learning](https://img.shields.io/badge/ML%20Engine-PyTorch%20%7C%20Scikit--Learn-F7931E?logo=pytorch)](https://pytorch.org/)
-[![Database](https://img.shields.io/badge/Database-MongoDB%20Atlas%20%2F%20Local-47A248?logo=mongodb)](https://www.mongodb.com/)
-[![Docker](https://img.shields.io/badge/Deployment-Docker%20Compose-2496ED?logo=docker)](https://www.docker.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Node.js](https://img.shields.io/badge/Node.js-v18+-339933?logo=node.js&logoColor=white)](services/service-a-operations)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](services/service-b-analytics)
+[![Next.js](https://img.shields.io/badge/Next.js-14.2-000000?logo=next.js&logoColor=white)](frontend)
 
-> **An enterprise-grade, distributed hydrological monitoring and predictive analytics platform.** Designed to bridge operational water table logging with multi-model machine learning forecasting, satellite-derived climate intelligence, and interactive policy simulation.
-
----
-
-## 📑 Table of Contents
-
-- [Overview](#-overview)
-- [System Architecture](#-system-architecture)
-- [Key Features](#-key-features)
-- [Tech Stack](#-tech-stack)
-- [Network & Port Configuration](#-network--port-configuration)
-- [Repository Structure](#-repository-structure)
-- [Quick Start with Docker](#-quick-start-with-docker)
-- [Manual Local Development](#-manual-local-development)
-- [Environment Variables](#-environment-variables)
-- [Remote & LAN Access](#-remote--lan-access)
-- [API Reference](#-api-reference)
-- [Machine Learning & Simulation Engine](#-machine-learning--simulation-engine)
-- [Author & License](#-author--license)
+A **production-ready, enterprise microservices architecture** designed for real-time groundwater monitoring, predictive analytics, climate ingestion, and scenario simulation across multi-regional water basins.
 
 ---
 
-## 🌐 Overview
+## 🏗️ Architecture Overview
 
-Groundwater depletion is a critical global challenge demanding proactive resource stewardship. Traditional monitoring systems are often siloed, retrospective, and lack the predictive foresight required for timely intervention.
+The system consists of **4 decoupled services** communicating over HTTP APIs and structured data pipelines:
 
-The **Groundwater Prediction Command Center** is an end-to-end, decoupled microservices solution engineered to:
-1. **Record & Ingest:** Track operational well measurements, water levels (mbgl - meters below ground level), and industrial/agricultural extraction logs.
-2. **Enrich with Climate Signals:** Ingest satellite telemetry, rainfall metrics, and meteorological parameters.
-3. **Forecast Depletion Trends:** Leverage dual ML architectures (**LSTM Neural Networks** & **Random Forest Regressors**) to generate 12-month water table depth forecasts with explainability metrics.
-4. **Simulate Policy Interventions:** Provide hydrologists and authorities with an interactive sandbox to test "what-if" scenarios across variable extraction stress and precipitation anomalies.
-
----
-
-## 🏗 System Architecture
-
-The platform adopts a decoupled microservice architecture ensuring operational logging (OLTP), analytics processing (OLAP/ML), and climate ingestion remain independent and resilient.
-
-```mermaid
-flowchart TD
-    subgraph ClientLayer["🖥️ Presentation Layer"]
-        UI["Next.js Command Center Dashboard\n(Port: 3000)"]
-    end
-
-    subgraph ServiceLayer["⚙️ Microservices Layer"]
-        ServiceA["Service A: Operational Gateway\n(Node.js / Express - Port: 4000)\n• System of Record (CRUD)\n• CSV Batch Ingestions\n• API Gateway & Job Proxy"]
-        ServiceB["Service B: Analytics Engine\n(Python / FastAPI - Port: 8000)\n• Feature Engineering (ETL)\n• LSTM & Random Forest ML\n• Model Registry & Inference"]
-        ServiceC["Service C: Climate Intelligence\n(Python / FastAPI - Port: 8100)\n• Satellite & Weather Telemetry\n• Rainfall Ingestion & Caching"]
-    end
-
-    subgraph DataLayer["💾 Persistence Layer"]
-        MongoDB[("MongoDB (Shared / Atlas)\n• Operational Collections\n• Analytics Feature Store\n• Climate & Satellite Logs")]
-    end
-
-    UI -->|"REST / API Proxy"| ServiceA
-    UI -.->|"Direct Inference & Jobs"| ServiceB
-    ServiceA -->|"Orchestrates Pipeline"| ServiceB
-    ServiceA -->|"Proxies Climate Queries"| ServiceC
-    ServiceB -->|"Reads Ops & Climate Data"| MongoDB
-    ServiceA -->|"Persists Records"| MongoDB
-    ServiceC -->|"Caches Meteorological Data"| MongoDB
+```text
+                                  +-----------------------+
+                                  |   Next.js Frontend    |
+                                  |   Command Center      |
+                                  |    (Port 3000)        |
+                                  +-----------+-----------+
+                                              |
+                     +------------------------+------------------------+
+                     |                        |                        |
+                     v                        v                        v
+          +--------------------+    +--------------------+    +--------------------+
+          |    Service A       |    |    Service B       |    |    Service C       |
+          | Operations Gateway |    | Analytics & ML     |    | Climate & Weather  |
+          |    (Port 4000)     |    |   Engine (8000)    |    |   Ingestion (8100) |
+          +---------+----------+    +---------+----------+    +---------+----------+
+                    |                         |                         |
+                    +-------------------------+-------------------------+
+                                              |
+                                              v
+                                   +---------------------+
+                                   |    MongoDB Atlas    |
+                                   |  (Multi-Collection) |
+                                   +---------------------+
 ```
 
-### Microservice Roles
-
-| Service | Technology | Role & Responsibilities |
-| :--- | :--- | :--- |
-| **Frontend** | Next.js 16, React 19, Tailwind CSS 4, Recharts | Interactive GIS-style dashboard, live regional monitoring grid, interactive simulation sandbox, compliance charts, and administrative ingestion tools. |
-| **Service A (Operations)** | Node.js, Express (ESM), Mongoose | Acts as the primary OLTP system of record and API gateway for region profiles, monitoring wells, daily water level readings, extraction audits, and proxy orchestration. |
-| **Service B (Analytics)** | Python 3.10+, FastAPI, PyTorch, Scikit-Learn | The analytical intelligence engine running automated ETL jobs, lag/rolling feature engineering, model training (LSTM & Random Forest), model registry promotion, and 12-month forecasting. |
-| **Service C (Climate)** | Python 3.10+, FastAPI, Motor/Pymongo | Handles meteorological data streams, precipitation ingestions, satellite metric tracking, and climate anomaly feeds. |
-
----
-
-## 🚀 Key Features
-
-* **Real-Time Operational Monitoring:** Live vital signs displaying active regions, monitored wells, total data points, and critical threshold breaches.
-* **Dual Machine Learning Forecasting:** Automated pipeline integrating both **Random Forest** (tabular ensemble) and **LSTM** (recurrent temporal sequence) models to project water depth 12 months ahead.
-* **Interactive Hydrological Simulation Lab:** Custom sandbox allowing operators to adjust extraction rates (e.g., +20% agricultural surge or -15% conservation) and climate scenarios to project aquifer resilience.
-* **Extraction Auditing & Compliance Tracking:** Continuous logging of water draw volumes against regional legal limits with automatic violation flags.
-* **One-Click End-to-End Pipeline:** Automated execution chain from raw CSV ingestion $\to$ daily aggregation ETL $\to$ model retraining $\to$ registry evaluation $\to$ forecast generation.
-* **Satellite & Precipitation Ingestion:** Integrates external weather APIs and batch rainfall datasets for environmental correlation.
-* **Dockerized & Remote-Ready:** Pre-configured bridge networking and dynamic `HOST_IP` / CORS bindings for seamless local network or cloud deployments.
-
----
-
-## 🛠 Tech Stack
-
-### Frontend
-* **Core:** Next.js 16 (App Router), React 19, TypeScript
-* **Styling:** Tailwind CSS 4, PostCSS, Lucide React (Icons)
-* **Data Visualization:** Recharts, Date-fns
-* **Networking:** Axios, REST Client Utilities
-
-### Backend & Services
-* **Service A (Ops & Gateway):** Node.js 20+, Express.js (ES Modules), Mongoose, Multer (CSV handling), Helmet, Morgan, CORS
-* **Service B (Analytics):** Python 3.10+, FastAPI, Uvicorn, Pandas, NumPy, Scikit-Learn, PyTorch (LSTM), Joblib
-* **Service C (Climate):** Python 3.10+, FastAPI, Motor, Pymongo, Pandas
-
-### Database & Infrastructure
-* **Database:** MongoDB 7.0+ (Local Community or MongoDB Atlas Cloud)
-* **Containerization:** Docker Engine, Docker Compose (Multi-stage builds)
-* **Networking:** Bridge network isolation with internal DNS resolution
-
----
-
-## 🌐 Network & Port Configuration
-
-| Component | Port | Host URL | Description |
-| :--- | :--- | :--- | :--- |
-| **Frontend** | `3000` | `http://localhost:3000` | Command Center UI Dashboard |
-| **Service A** | `4000` | `http://localhost:4000` | Operations API & Gateway (`/api/v1`) |
-| **Service B** | `8000` | `http://localhost:8000` | Analytics & ML Engine (`/jobs/*`, `/health`) |
-| **Service C** | `8100` | `http://localhost:8100` | Climate & Satellite API (`/api/v1/*`) |
-| **MongoDB** | `27017`| `mongodb://localhost:27017` | Database Instance |
-
----
-
-## 📁 Repository Structure
+### Microservice Directory Breakdown
 
 ```text
 groundwater-command-center/
-├── docker-compose.yml              # Multi-container orchestration specification
-├── .env.example                    # Global environment template
 │
-├── frontend/                       # Next.js 16 Presentation Layer
+├── frontend/                       # Next.js 14 Dashboard UI (React 18, Tailwind CSS, Recharts)
 │   ├── src/
-│   │   ├── app/                    # App router pages (dashboard, regions, simulation, admin)
-│   │   ├── components/             # Reusable UI widgets, charts, and control forms
-│   │   ├── lib/                    # API client configuration (Service A, B, C)
-│   │   └── types/                  # TypeScript interface contracts
-│   ├── Dockerfile                  # Production Next.js container configuration
+│   │   ├── app/                    # App Router pages and navigation
+│   │   ├── components/             # Reusable UI widgets (Charts, Maps, Simulation Lab)
+│   │   └── lib/                    # API client layer & utility helpers
+│   ├── Dockerfile
 │   └── package.json
 │
 ├── services/
@@ -157,9 +67,9 @@ groundwater-command-center/
 │   │   ├── src/
 │   │   │   ├── extract/            # Data extraction loaders from MongoDB
 │   │   │   ├── transform/          # Time-series feature engineering & lag features
-│   │   │   ├── modelling/          # LSTM & Random Forest training, evaluation, explainability
-│   │   │   ├── inference/          # 12-month predictive forecasting engine
-│   │   │   └── jobs/               # Daily summary and ETL execution routines
+│   │   │   ├── modelling/          # Linear Regression, Random Forest & LSTM polymorphic models
+│   │   │   ├── inference/          # 12-month predictive forecasting engine & model registry
+│   │   │   └── jobs/               # Daily summary, training, and ETL execution routines
 │   │   ├── app.py                  # FastAPI background worker & job endpoints
 │   │   ├── main.py                 # CLI entry point for scheduled tasks
 │   │   ├── Dockerfile
@@ -319,8 +229,8 @@ To allow other devices or team members on your local network (LAN) to access the
 ### Service B — Analytics & ML Engine (`http://localhost:8000`)
 * `GET /health` — Analytics engine status & active model metadata
 * `POST /jobs/daily-summary` — Trigger asynchronous ETL aggregation
-* `POST /jobs/train` — Train Random Forest & LSTM models on feature store
-* `POST /jobs/promote` — Evaluate and promote best-performing model to production registry
+* `POST /jobs/train` — Train Random Forest, Linear Regression, & LSTM models on feature store
+* `POST /jobs/promote` — Evaluate candidate model metrics (MAE/RMSE) and promote the best-performing model to production registry
 * `POST /jobs/forecast` — Run batch inference and write 12-month projections to database
 * `POST /jobs/pipeline` — Master orchestrator: runs ETL $\to$ Train $\to$ Promote $\to$ Forecast
 
@@ -340,6 +250,12 @@ The platform transforms raw water level logs and weather events into predictive 
 - **Temporal Lags:** $t-1, t-7, t-30$ day water depth variations.
 - **Rolling Aggregations:** 7-day and 30-day moving averages and standard deviations.
 - **Climate Interaction Features:** Cumulative rainfall deficit indices and seasonal precipitation spikes.
+
+### Model Registry & Polymorphism
+Service B supports pluggable algorithms via `BaseGroundwaterModel`:
+- **Linear Regression**: Fast baseline model for linear trend estimation.
+- **Random Forest**: Non-linear ensemble model capturing complex feature interactions.
+- **PyTorch LSTM**: Deep recurrent neural network for long-term temporal dependencies.
 
 ### Interactive Simulation Sandbox
 The Simulation Lab allows domain experts to adjust operational variables and view projected aquifer behavior:
