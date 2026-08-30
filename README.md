@@ -265,6 +265,12 @@ $$\text{Projected Depth}_{t+k} = f(\text{Historical Baseline}, \Delta\text{Extra
 
 ---
 
+## 📌 Known Issues & Tracked Items
+
+See [docs/known-issues.md](docs/known-issues.md) for tracked hypotheses, multi-model sign-agreement validation items, and feature set performance benchmarks.
+
+---
+
 ## 👨‍💻 Author & License
 
 Developed with passion by **Pratik**  
